@@ -13,8 +13,7 @@
 
 ## Requires owner approval
 
-- [ ] Choose the final public GitHub repository URL and replace
-  `<repository-url>` in `README.md`.
+- [x] Choose the final public GitHub repository URL and add it to `README.md`.
 - [ ] Create and push the public repository.
 - [ ] Re-run validation from the public clone.
 - [ ] Add an optional marketplace preview image.

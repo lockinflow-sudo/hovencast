@@ -22,10 +22,8 @@ or recording is included.
 
 ## Install
 
-Once this repository has a public URL:
-
 ```sh
-omarchy plugin add <repository-url> --enable
+omarchy plugin add https://github.com/lockinflow-sudo/omacast.git --enable
 ~/.config/omarchy/plugins/hoven.cast/omacast-setup
 ```
 
