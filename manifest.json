@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "author": "Sean Hovenkamp",
   "license": "MIT",
-  "description": "Share an Omarchy screen, window, or area with audio to tested TCL Roku TVs.",
+  "description": "Share an Omarchy screen, window, or area with audio to compatible Roku TVs.",
   "kinds": [
     "bar-widget"
   ],
