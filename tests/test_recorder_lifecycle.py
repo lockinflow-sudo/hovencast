@@ -21,9 +21,12 @@ from omarchy_cast import (  # noqa: E402
     Counters,
     Recorder,
     SilentAudioRoute,
+    picker_source_info,
     recover_orphan_audio_route,
     window_crop_geometry,
 )
+
+PICKER = pathlib.Path(__file__).resolve().parents[1] / "omarchy-cast-picker"
 
 
 class FakeProcess:
@@ -92,6 +95,61 @@ class FakeLoop:
 
 
 class RecorderLifecycleTest(unittest.TestCase):
+    def test_picker_metadata_survives_exit_until_backend_consumes_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            runtime = root / "runtime"
+            fake_bin = root / "bin"
+            runtime.mkdir()
+            fake_bin.mkdir()
+            hyprctl = fake_bin / "hyprctl"
+            hyprctl.write_text(
+                "#!/bin/bash\n"
+                "printf '%s\\n' '[{\"focused\":true,\"name\":\"eDP-1\","
+                "\"description\":\"Built-in\",\"width\":1920,\"height\":1200}]'\n",
+                encoding="utf-8",
+            )
+            hyprctl.chmod(0o755)
+            shell = fake_bin / "omarchy-shell"
+            shell.write_text(
+                "#!/bin/bash\n"
+                "case \"${2:-}\" in\n"
+                "  pickerResult) printf '%s\\n' 'window:42' ;;\n"
+                "  pickerMetadata) printf '%s\\n' "
+                "'{\"kind\":\"window\",\"windowAddress\":\"42\","
+                "\"output\":\"eDP-1\"}' ;;\n"
+                "esac\n",
+                encoding="utf-8",
+            )
+            shell.chmod(0o755)
+            grim = fake_bin / "grim"
+            grim.write_text("#!/bin/bash\nexit 1\n", encoding="utf-8")
+            grim.chmod(0o755)
+            environment = {
+                "PATH": f"{fake_bin}:/usr/bin",
+                "XDG_RUNTIME_DIR": str(runtime),
+            }
+
+            result = subprocess.run(
+                [str(PICKER)],
+                env=environment,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            selection = runtime / "omacast-picker/source-selection"
+
+            self.assertEqual(result.stdout.strip(), "[SELECTION]/screen:eDP-1")
+            self.assertTrue(selection.exists())
+            with mock.patch.dict(os.environ, environment, clear=True):
+                metadata = picker_source_info()
+                self.assertEqual(metadata["kind"], "window")
+                self.assertEqual(metadata["windowAddress"], "42")
+                self.assertEqual(metadata["output"], "eDP-1")
+                self.assertFalse(selection.exists())
+                self.assertEqual(picker_source_info(), {"kind": "unknown"})
+
     @mock.patch("omarchy_cast.process_is_running", return_value=False)
     @mock.patch.object(SilentAudioRoute, "stop")
     def test_orphan_audio_route_is_recovered(

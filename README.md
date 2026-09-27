@@ -3,7 +3,7 @@
 OmaCast is an Omarchy bar plugin for sharing a screen, window, or selected area,
 with desktop audio, to a compatible Roku TV on the same local network.
 
-Version 0.1.0 uses Miracast over Infrastructure (MICE). It has been physically
+Version 0.1.1 uses Miracast over Infrastructure (MICE). It has been physically
 tested with TCL Roku models 32S331, 55S405, and 65S451. Other Roku TVs that
 advertise MICE and provide valid Roku device information are shown as
 compatible candidates, but still need community testing. Fire TV, Wi-Fi
@@ -95,7 +95,7 @@ screen capture before attaching diagnostics.
 ## Known limitations
 
 - TCL Roku models 32S331, 55S405, and 65S451 are the only physically tested
-  receivers in 0.1.0. Other discovered Roku models may or may not work.
+  receivers in 0.1.1. Other discovered Roku models may or may not work.
 - Discovery depends on Roku MICE advertisement and local multicast traffic.
 - 720p and 1080p Roku modes are selected automatically; other resolutions are
   not supported.

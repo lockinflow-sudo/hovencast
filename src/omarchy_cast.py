@@ -95,6 +95,10 @@ def picker_source_info() -> dict[str, Any]:
     except OSError:
         return {"kind": "unknown"}
     try:
+        selection_file.unlink()
+    except OSError:
+        pass
+    try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
         parsed = {"kind": raw}

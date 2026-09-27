@@ -20,6 +20,7 @@ mkdir -p -m 700 "$runtime_root"
 chmod 700 "$runtime_root"
 selection_file="$runtime_root/source-selection"
 rm -f "$selection_file"
+selection_committed=0
 
 monitor_json="$(hyprctl -j monitors 2>/dev/null | jq -c '([.[] | select(.focused)] + .)[0] // {}' 2>/dev/null)"
 output="$(jq -r '.name // empty' <<<"$monitor_json")"
@@ -37,7 +38,10 @@ window_list_b64="$(printf '%s' "${XDPH_WINDOW_SHARING_LIST:-}" | base64 -w0)"
 
 cleanup() {
   omarchy-shell "$ipc_target" pickerClose >/dev/null 2>&1 || true
-  rm -f -- "$preview" "$selection_file" "$selection_file.tmp"
+  rm -f -- "$preview" "$selection_file.tmp"
+  if (( ! selection_committed )); then
+    rm -f -- "$selection_file"
+  fi
 }
 trap cleanup EXIT INT TERM
 
@@ -53,6 +57,7 @@ for ((attempt = 0; attempt < 3000; attempt++)); do
       metadata="$(omarchy-shell "$ipc_target" pickerMetadata 2>/dev/null || true)"
       printf '%s\n' "$metadata" >"$selection_file.tmp"
       mv -f "$selection_file.tmp" "$selection_file"
+      selection_committed=1
       if [[ "$result" == window:* ]]; then
         # Use the stable monitor portal stream. OmaCast crops it to the chosen
         # window and follows that window as its geometry changes.
@@ -68,6 +73,7 @@ for ((attempt = 0; attempt < 3000; attempt++)); do
         metadata="$(omarchy-shell "$ipc_target" pickerMetadata 2>/dev/null || true)"
         printf '%s\n' "$metadata" >"$selection_file.tmp"
         mv -f "$selection_file.tmp" "$selection_file"
+        selection_committed=1
         printf '[SELECTION]%s/region:%s\n' "$allow_token" "$region"
         exit 0
       fi
