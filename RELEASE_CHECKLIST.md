@@ -16,5 +16,7 @@
 - [x] Choose the final public GitHub repository URL and add it to `README.md`.
 - [x] Create and push the public repository.
 - [x] Re-run validation from the public clone.
+- [x] Validate v0.1.0 with a live 32-inch TCL Roku cast, synchronized audio, and clean stop/restoration.
+- [x] Create and push the public GitHub `v0.1.0` release.
 - [ ] Add an optional marketplace preview image.
-- [ ] Submit the repository URL through the Omarchy marketplace issue form.
+- [x] Submit the repository URL through the Omarchy marketplace issue form ([#9033](https://github.com/omacom/omarchy-plugin-marketplace/issues/9033)).
