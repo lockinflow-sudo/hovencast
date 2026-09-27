@@ -1,0 +1,76 @@
+#!/bin/bash
+
+set -u
+
+ipc_target="${OMACAST_IPC_TARGET:-hoven.cast}"
+allow_token=""
+for argument in "$@"; do
+  if [[ "$argument" == "--allow-token" ]]; then
+    allow_token="r"
+  fi
+done
+
+runtime_root="${XDG_RUNTIME_DIR:-/tmp}/omacast-picker"
+mkdir -p -m 700 "$runtime_root"
+selection_file="$runtime_root/source-selection"
+rm -f "$selection_file"
+
+monitor_json="$(hyprctl -j monitors 2>/dev/null | jq -c '([.[] | select(.focused)] + .)[0] // {}' 2>/dev/null)"
+output="$(jq -r '.name // empty' <<<"$monitor_json")"
+description="$(jq -r '.description // empty' <<<"$monitor_json")"
+width="$(jq -r '.width // 0' <<<"$monitor_json")"
+height="$(jq -r '.height // 0' <<<"$monitor_json")"
+
+if [[ -z "$output" ]]; then
+  exit 1
+fi
+
+preview="$runtime_root/${output//[^A-Za-z0-9_.-]/_}.png"
+grim -o "$output" -s 0.25 "$preview" >/dev/null 2>&1 || preview=""
+window_list_b64="$(printf '%s' "${XDPH_WINDOW_SHARING_LIST:-}" | base64 -w0)"
+
+cleanup() {
+  omarchy-shell "$ipc_target" pickerClose >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+if ! omarchy-shell "$ipc_target" pickerOpen \
+  "$output" "$description" "$width" "$height" "$preview" "$window_list_b64" >/dev/null; then
+  exit 1
+fi
+
+for ((attempt = 0; attempt < 3000; attempt++)); do
+  result="$(omarchy-shell "$ipc_target" pickerResult 2>/dev/null || true)"
+  case "$result" in
+    screen:*|window:*|region:*)
+      metadata="$(omarchy-shell "$ipc_target" pickerMetadata 2>/dev/null || true)"
+      printf '%s\n' "$metadata" >"$selection_file.tmp"
+      mv -f "$selection_file.tmp" "$selection_file"
+      if [[ "$result" == window:* ]]; then
+        # Use the stable monitor portal stream. OmaCast crops it to the chosen
+        # window and follows that window as its geometry changes.
+        printf '[SELECTION]%s/screen:%s\n' "$allow_token" "$output"
+      else
+        printf '[SELECTION]%s/%s\n' "$allow_token" "$result"
+      fi
+      exit 0
+      ;;
+    area)
+      region="$(slurp -f '%o@%x,%y,%w,%h' 2>/dev/null || true)"
+      if [[ -n "$region" ]]; then
+        metadata="$(omarchy-shell "$ipc_target" pickerMetadata 2>/dev/null || true)"
+        printf '%s\n' "$metadata" >"$selection_file.tmp"
+        mv -f "$selection_file.tmp" "$selection_file"
+        printf '[SELECTION]%s/region:%s\n' "$allow_token" "$region"
+        exit 0
+      fi
+      exit 1
+      ;;
+    cancel)
+      exit 1
+      ;;
+  esac
+  sleep 0.1
+done
+
+exit 1

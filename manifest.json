@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "hoven.cast",
+  "name": "OmaCast",
+  "version": "0.1.0",
+  "author": "Sean Hovenkamp",
+  "license": "MIT",
+  "description": "Share an Omarchy screen, window, or area with audio to tested TCL Roku TVs.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "OmaCast",
+    "description": "Share an Omarchy screen and audio with a supported Roku TV.",
+    "category": "Network",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "keepLocalAudio": false
+    },
+    "schema": [
+      {
+        "key": "keepLocalAudio",
+        "type": "boolean",
+        "label": "Keep audio on this computer",
+        "defaultValue": false
+      }
+    ]
+  }
+}

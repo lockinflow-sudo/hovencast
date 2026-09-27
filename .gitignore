@@ -1,0 +1,6 @@
+/build/
+*.events.jsonl
+*.ts
+__pycache__/
+*.py[cod]
+.qmllint.ini
