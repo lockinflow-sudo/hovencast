@@ -44,6 +44,7 @@ Panel {
   property int sourceWindowIndex: 0
 
   readonly property string backendCommand: Model.localPath(Qt.resolvedUrl("omarchy-cast"))
+  readonly property string version: Model.version()
   readonly property bool sessionActive: sessionState === "awaiting-portal"
     || sessionState === "connecting"
     || sessionState === "streaming"
@@ -504,7 +505,9 @@ Panel {
     foreground: root.sessionActive ? root.foreground : root.dim
     active: root.sessionState === "error"
     activeColor: root.urgent
-    tooltipText: root.sessionActive ? "OmaCast · sharing" : "OmaCast"
+    tooltipText: root.sessionActive
+      ? "OmaCast v" + root.version + " · sharing"
+      : "OmaCast v" + root.version
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton && root.sessionActive) root.stopCasting()
       else root.toggle()
@@ -563,7 +566,7 @@ Panel {
 
             PanelHero {
               width: parent.width
-              title: "OmaCast"
+              title: "OmaCast v" + root.version
               meta: root.sourcePickerPage === "windows" ? "CHOOSE A WINDOW" : "READY TO SHARE"
               foreground: root.foreground
               fontFamily: root.fontFamily
@@ -901,7 +904,7 @@ Panel {
 
           PanelHero {
             width: parent.width
-            title: "OmaCast"
+            title: "OmaCast v" + root.version
             meta: root.activeName !== ""
               ? root.activeName + " · " + Model.stateLabel(root.sessionState)
               : Model.stateLabel(root.sessionState)

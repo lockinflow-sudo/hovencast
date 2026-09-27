@@ -1,3 +1,7 @@
+function version() {
+  return "0.1.0"
+}
+
 function parseDiscovery(raw) {
   var result = { receivers: [], error: "" }
   try {
@@ -126,6 +130,7 @@ function localPath(url) {
 
 if (typeof module !== "undefined") {
   module.exports = {
+    version: version,
     parseDiscovery: parseDiscovery,
     parseEvent: parseEvent,
     parsePickerWindowList: parsePickerWindowList,

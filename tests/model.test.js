@@ -1,5 +1,8 @@
 const assert = require("node:assert/strict")
 const model = require("../Model.js")
+const manifest = require("../manifest.json")
+
+assert.equal(model.version(), manifest.version)
 
 const discovery = model.parseDiscovery(JSON.stringify({
   receivers: [

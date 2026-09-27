@@ -31,6 +31,11 @@ from omarchy_cast_protocol import (
     probe_wfd_capabilities,
 )
 
+APP_ROOT = pathlib.Path(__file__).resolve().parents[1]
+APP_VERSION = json.loads(
+    (APP_ROOT / "manifest.json").read_text(encoding="utf-8")
+)["version"]
+
 
 def runtime_root(required: bool = False) -> pathlib.Path | None:
     value = os.environ.get("XDG_RUNTIME_DIR", "").strip()
@@ -1275,6 +1280,7 @@ def run_cast_live(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Cast an Omarchy desktop to a supported Roku TV")
+    parser.add_argument("--version", action="version", version=f"OmaCast {APP_VERSION}")
     subparsers = parser.add_subparsers(dest="command", required=True)
     discover = subparsers.add_parser("discover", help="discover Miracast-over-LAN receivers")
     discover.set_defaults(func=run_discover)
@@ -1299,13 +1305,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    args = build_parser().parse_args()
     required_commands = ("avahi-browse", "ffmpeg", "ffprobe", "pactl")
     missing = [command for command in required_commands if not shutil.which(command)]
     if missing:
         print(f"missing required commands: {', '.join(missing)}", file=sys.stderr)
         return 2
     recover_orphan_audio_route()
-    args = build_parser().parse_args()
     return args.func(args)
 
 
