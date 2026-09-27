@@ -1,9 +1,12 @@
 #!/usr/bin/python
 
 import io
+import json
+import os
 import pathlib
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 from unittest import mock
@@ -14,7 +17,13 @@ import gi  # noqa: E402
 
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst  # noqa: E402
-from omarchy_cast import Counters, Recorder, window_crop_geometry  # noqa: E402
+from omarchy_cast import (  # noqa: E402
+    Counters,
+    Recorder,
+    SilentAudioRoute,
+    recover_orphan_audio_route,
+    window_crop_geometry,
+)
 
 
 class FakeProcess:
@@ -83,6 +92,56 @@ class FakeLoop:
 
 
 class RecorderLifecycleTest(unittest.TestCase):
+    @mock.patch("omarchy_cast.process_is_running", return_value=False)
+    @mock.patch.object(SilentAudioRoute, "stop")
+    def test_orphan_audio_route_is_recovered(
+        self, stop: mock.Mock, _running: mock.Mock
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime = pathlib.Path(temporary)
+            state_root = runtime / "omacast"
+            state_root.mkdir()
+            (state_root / "audio-route.json").write_text(
+                json.dumps(
+                    {
+                        "pid": 999999,
+                        "previous_sink": "speakers",
+                        "sink_name": "omarchy_cast_999999",
+                        "module_id": 42,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(runtime)}):
+                recover_orphan_audio_route()
+
+        stop.assert_called_once_with(announce=False)
+
+    @mock.patch("omarchy_cast.process_is_running", return_value=True)
+    @mock.patch.object(SilentAudioRoute, "stop")
+    def test_live_audio_route_is_not_recovered(
+        self, stop: mock.Mock, _running: mock.Mock
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime = pathlib.Path(temporary)
+            state_root = runtime / "omacast"
+            state_root.mkdir()
+            (state_root / "audio-route.json").write_text(
+                json.dumps(
+                    {
+                        "pid": os.getpid(),
+                        "previous_sink": "speakers",
+                        "sink_name": "omarchy_cast_live",
+                        "module_id": 43,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(runtime)}):
+                recover_orphan_audio_route()
+
+        stop.assert_not_called()
+
     def test_stop_closes_fifo_consumers_before_pipeline(self) -> None:
         calls: list[str] = []
         recorder = Recorder.__new__(Recorder)

@@ -11,11 +11,13 @@ from unittest import mock
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
 from omarchy_cast_protocol import (  # noqa: E402
+    Receiver,
     RtspMessage,
     build_mice_source_ready,
     choose_video_mode,
     decode_avahi_name,
     discover_mice_receivers,
+    enrich_receiver_details,
     format_rtsp_ok,
     format_rtsp_request,
     parse_roku_device_info,
@@ -69,12 +71,28 @@ class AvahiDecodeTest(unittest.TestCase):
 class ReceiverProfileTest(unittest.TestCase):
     def test_roku_device_info_resolution(self) -> None:
         info = parse_roku_device_info(
-            b"<device-info><model-name>32S331</model-name>"
+            b"<device-info><vendor-name>TCL</vendor-name><model-name>32S331</model-name>"
             b"<ui-resolution>720p</ui-resolution></device-info>"
         )
         self.assertEqual(info["native_width"], 1280)
         self.assertEqual(info["native_height"], 720)
         self.assertEqual(info["model"], "32S331")
+        self.assertEqual(info["vendor"], "TCL")
+
+    @mock.patch("omarchy_cast_protocol.probe_roku_device_info")
+    def test_discovery_filters_unverified_models(self, probe: mock.Mock) -> None:
+        receivers = [
+            Receiver("Supported", "192.168.1.10", 7250, "wlan0"),
+            Receiver("Unknown", "192.168.1.11", 7250, "wlan0"),
+        ]
+        probe.side_effect = [
+            {"vendor": "TCL", "model": "32S331", "native_width": 1280, "native_height": 720},
+            {"vendor": "Other", "model": "Fake", "native_width": 1920, "native_height": 1080},
+        ]
+
+        supported = enrich_receiver_details(receivers)
+
+        self.assertEqual([receiver.address for receiver in supported], ["192.168.1.10"])
 
     @mock.patch("omarchy_cast_protocol.probe_roku_device_info")
     def test_auto_mode_matches_720p_roku_panel(self, probe: mock.Mock) -> None:

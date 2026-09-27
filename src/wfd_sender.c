@@ -21,6 +21,7 @@ typedef enum {
 
 static GMainLoop *main_loop;
 static gboolean receiver_streaming;
+static GInetAddress *expected_receiver_address;
 
 #define TYPE_OMARCHY_WFD_CLIENT (omarchy_wfd_client_get_type())
 G_DECLARE_FINAL_TYPE(OmarchyWfdClient, omarchy_wfd_client, OMARCHY, WFD_CLIENT, GstRTSPClient)
@@ -29,6 +30,7 @@ struct _OmarchyWfdClient {
   GstRTSPClient parent_instance;
   WfdState state;
   guint keep_alive_source_id;
+  gboolean authorized_peer;
 };
 
 G_DEFINE_TYPE(OmarchyWfdClient, omarchy_wfd_client, GST_TYPE_RTSP_CLIENT)
@@ -305,8 +307,8 @@ static void client_closed(GstRTSPClient *client) {
     g_source_remove(self->keep_alive_source_id);
     self->keep_alive_source_id = 0;
   }
-  event("receiver-state", "rtsp-closed");
-  if (main_loop)
+  event("receiver-state", self->authorized_peer ? "rtsp-closed" : "rejected-peer-closed");
+  if (self->authorized_peer && main_loop)
     g_main_loop_quit(main_loop);
 }
 
@@ -382,6 +384,23 @@ static gboolean query_support_idle(gpointer data) {
 
 static void client_connected(GstRTSPServer *server, GstRTSPClient *client) {
   (void)server;
+  GstRTSPConnection *connection = gst_rtsp_client_get_connection(client);
+  GSocket *socket = connection ? gst_rtsp_connection_get_read_socket(connection) : NULL;
+  g_autoptr(GSocketAddress) remote =
+      socket ? g_socket_get_remote_address(socket, NULL) : NULL;
+  GInetAddress *remote_address = remote && G_IS_INET_SOCKET_ADDRESS(remote)
+      ? g_inet_socket_address_get_address(G_INET_SOCKET_ADDRESS(remote))
+      : NULL;
+  if (!remote_address || !expected_receiver_address ||
+      !g_inet_address_equal(remote_address, expected_receiver_address)) {
+    g_autofree char *peer = remote_address
+        ? g_inet_address_to_string(remote_address)
+        : g_strdup("unknown");
+    event("rtsp-rejected-peer", peer);
+    gst_rtsp_client_close(client);
+    return;
+  }
+  OMARCHY_WFD_CLIENT(client)->authorized_peer = TRUE;
   event("receiver-state", "rtsp-connected");
   /* Roku establishes TCP before its RTSP state machine is ready. */
   g_timeout_add(500, query_support_idle, g_object_ref(client));
@@ -434,6 +453,34 @@ static gboolean send_source_ready(const char *receiver, const char *name,
     return FALSE;
   *out_connection = g_steal_pointer(&connection);
   return TRUE;
+}
+
+static char *route_address_for_receiver(const char *receiver, GError **error) {
+  g_autoptr(GInetAddress) remote_address = g_inet_address_new_from_string(receiver);
+  if (!remote_address) {
+    g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+                "receiver address must be a numeric IP address");
+    return NULL;
+  }
+  GSocketFamily family = g_inet_address_get_family(remote_address);
+  g_autoptr(GSocket) socket =
+      g_socket_new(family, G_SOCKET_TYPE_DATAGRAM, G_SOCKET_PROTOCOL_UDP, error);
+  if (!socket)
+    return NULL;
+  g_autoptr(GSocketAddress) destination =
+      g_inet_socket_address_new(remote_address, 7250);
+  if (!g_socket_connect(socket, destination, NULL, error))
+    return NULL;
+  g_autoptr(GSocketAddress) local = g_socket_get_local_address(socket, error);
+  if (!local || !G_IS_INET_SOCKET_ADDRESS(local)) {
+    if (local)
+      g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                  "could not determine the receiver-facing local address");
+    return NULL;
+  }
+  GInetAddress *local_address =
+      g_inet_socket_address_get_address(G_INET_SOCKET_ADDRESS(local));
+  return g_inet_address_to_string(local_address);
 }
 
 static gboolean stop_loop(gpointer data) {
@@ -489,8 +536,15 @@ int main(int argc, char **argv) {
     friendly_name = "Omarchy";
   if (!source_id || !*source_id)
     source_id = "OmaCastSender001";
+  g_autoptr(GError) error = NULL;
+  g_autofree char *bind_address = route_address_for_receiver(receiver, &error);
+  if (!bind_address) {
+    g_printerr("could not determine safe RTSP bind address: %s\n", error->message);
+    return 1;
+  }
+  expected_receiver_address = g_inet_address_new_from_string(receiver);
   g_autoptr(OmarchyWfdServer) server = g_object_new(TYPE_OMARCHY_WFD_SERVER, NULL);
-  gst_rtsp_server_set_address(GST_RTSP_SERVER(server), "0.0.0.0");
+  gst_rtsp_server_set_address(GST_RTSP_SERVER(server), bind_address);
   gst_rtsp_server_set_service(GST_RTSP_SERVER(server), "7236");
   g_autoptr(GstRTSPMediaFactory) factory = gst_rtsp_media_factory_new();
   g_autofree char *escaped = g_strescape(artifact, NULL);
@@ -505,15 +559,17 @@ int main(int argc, char **argv) {
   gst_rtsp_mount_points_add_factory(mounts, "/wfd1.0", g_object_ref(factory));
   g_object_unref(mounts);
   if (!gst_rtsp_server_attach(GST_RTSP_SERVER(server), NULL)) {
-    g_printerr("could not listen on TCP 7236\n");
+    g_printerr("could not listen on %s:7236\n", bind_address);
+    g_clear_object(&expected_receiver_address);
     return 1;
   }
-  g_autoptr(GError) error = NULL;
   g_autoptr(GSocketConnection) mice_connection = NULL;
   if (!send_source_ready(receiver, friendly_name, source_id, &mice_connection, &error)) {
     g_printerr("MICE signalling failed: %s\n", error->message);
+    g_clear_object(&expected_receiver_address);
     return 1;
   }
+  event("rtsp-listen", bind_address);
   event("mice-source-ready", receiver);
   main_loop = g_main_loop_new(NULL, FALSE);
   g_unix_signal_add(SIGINT, interrupted, NULL);
@@ -524,5 +580,6 @@ int main(int argc, char **argv) {
   g_main_loop_run(main_loop);
   g_main_loop_unref(main_loop);
   main_loop = NULL;
+  g_clear_object(&expected_receiver_address);
   return 0;
 }

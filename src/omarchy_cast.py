@@ -32,6 +32,35 @@ from omarchy_cast_protocol import (
 )
 
 
+def runtime_root(required: bool = False) -> pathlib.Path | None:
+    value = os.environ.get("XDG_RUNTIME_DIR", "").strip()
+    if not value:
+        if required:
+            raise RuntimeError("OmaCast requires XDG_RUNTIME_DIR")
+        return None
+    root = pathlib.Path(value) / "omacast"
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    root.chmod(0o700)
+    return root
+
+
+def audio_route_state_path() -> pathlib.Path | None:
+    root = runtime_root()
+    return root / "audio-route.json" if root else None
+
+
+def process_is_running(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
 def emit(event_file: Any, event: str, **fields: Any) -> None:
     record = {"time": time.time(), "event": event, **fields}
     line = json.dumps(record, sort_keys=True)
@@ -52,8 +81,10 @@ def pulse_default_monitor() -> str:
 
 
 def picker_source_info() -> dict[str, Any]:
-    runtime_root = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
-    selection_file = runtime_root / "omacast-picker" / "source-selection"
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR", "").strip()
+    if not runtime_dir:
+        return {"kind": "unknown"}
+    selection_file = pathlib.Path(runtime_dir) / "omacast-picker" / "source-selection"
     try:
         raw = selection_file.read_text(encoding="utf-8").strip()
     except OSError:
@@ -152,6 +183,21 @@ class SilentAudioRoute:
         self.previous_sink: str | None = None
         self.module_id: int | None = None
 
+    def _save_recovery_state(self) -> None:
+        path = audio_route_state_path()
+        if path is None or not self.previous_sink or self.module_id is None:
+            return
+        payload = {
+            "pid": os.getpid(),
+            "previous_sink": self.previous_sink,
+            "sink_name": self.sink_name,
+            "module_id": self.module_id,
+        }
+        temporary = path.with_name(f".{path.name}.{os.getpid()}")
+        temporary.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+        temporary.chmod(0o600)
+        os.replace(temporary, path)
+
     def start(self) -> str:
         self.previous_sink = subprocess.run(
             ["pactl", "get-default-sink"],
@@ -174,6 +220,7 @@ class SilentAudioRoute:
             stdout=subprocess.PIPE,
         )
         self.module_id = int(result.stdout.strip())
+        self._save_recovery_state()
         try:
             subprocess.run(["pactl", "set-default-sink", self.sink_name], check=True)
             self._move_inputs(self.sink_name)
@@ -214,7 +261,7 @@ class SilentAudioRoute:
                 stderr=subprocess.DEVNULL,
             )
 
-    def stop(self) -> None:
+    def stop(self, announce: bool = True) -> None:
         if self.module_id is None:
             return
         cast_sink_id = None
@@ -244,13 +291,36 @@ class SilentAudioRoute:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        emit(
-            self.event_file,
-            "audio-route",
-            mode="restored",
-            restored_sink=self.previous_sink,
-        )
+        if announce:
+            emit(
+                self.event_file,
+                "audio-route",
+                mode="restored",
+                restored_sink=self.previous_sink,
+            )
         self.module_id = None
+        state_path = audio_route_state_path()
+        if state_path:
+            state_path.unlink(missing_ok=True)
+
+
+def recover_orphan_audio_route() -> None:
+    state_path = audio_route_state_path()
+    if state_path is None or not state_path.is_file():
+        return
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        pid = int(state["pid"])
+        if process_is_running(pid):
+            return
+        route = SilentAudioRoute(None)
+        route.previous_sink = str(state["previous_sink"])
+        route.sink_name = str(state["sink_name"])
+        route.module_id = int(state["module_id"])
+        route.stop(announce=False)
+        print("Recovered audio routing left by an interrupted OmaCast session", file=sys.stderr)
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError, OSError, subprocess.SubprocessError) as error:
+        print(f"Could not recover interrupted OmaCast audio routing: {error}", file=sys.stderr)
 
 
 @dataclass
@@ -1124,15 +1194,12 @@ def run_cast_live(args: argparse.Namespace) -> int:
     helper = root / "build" / "wfd-sender"
     if not helper.is_file():
         raise RuntimeError("run ./omacast-setup before casting")
-    runtime_base = pathlib.Path(
-        os.environ.get("XDG_RUNTIME_DIR", f"/tmp/omacast-{os.getuid()}")
-    )
-    runtime_root = runtime_base / "omacast"
-    runtime_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    event_path = runtime_root / "session.events.jsonl"
+    session_root = runtime_root(required=True)
+    assert session_root is not None
+    event_path = session_root / "session.events.jsonl"
     video_mode = choose_video_mode(args.address, args.quality)
     Gst.init(None)
-    with tempfile.TemporaryDirectory(prefix="live-", dir=runtime_root) as runtime_dir:
+    with tempfile.TemporaryDirectory(prefix="live-", dir=session_root) as runtime_dir:
         raw_transport_fifo = pathlib.Path(runtime_dir) / "raw-transport.ts"
         transport_fifo = pathlib.Path(runtime_dir) / "transport.ts"
         os.mkfifo(raw_transport_fifo, 0o600)
@@ -1237,6 +1304,7 @@ def main() -> int:
     if missing:
         print(f"missing required commands: {', '.join(missing)}", file=sys.stderr)
         return 2
+    recover_orphan_audio_route()
     args = build_parser().parse_args()
     return args.func(args)
 

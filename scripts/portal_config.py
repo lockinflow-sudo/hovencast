@@ -12,9 +12,6 @@ import tempfile
 from typing import Any
 
 
-MANAGED_VALUES = {
-    "allow_token_by_default": "true",
-}
 SECTION_RE = re.compile(r"^\s*([A-Za-z0-9_.-]+)\s*\{\s*$")
 KEY_RE = re.compile(
     r"^(?P<indent>\s*)(?P<key>allow_token_by_default|custom_picker_binary)"
@@ -140,13 +137,12 @@ def install(picker: pathlib.Path) -> None:
             "config": str(target),
             "config_existed": existed,
             "section_present": section_present,
-            "previous": previous,
+            "previous": {"custom_picker_binary": previous["custom_picker_binary"]},
             "installed_picker": str(picker),
         }
         state_root.mkdir(mode=0o700, parents=True, exist_ok=True)
         atomic_write(backup_file, original_text, mode)
 
-    lines = set_value(lines, "allow_token_by_default", MANAGED_VALUES["allow_token_by_default"])
     lines = set_value(lines, "custom_picker_binary", str(picker))
     atomic_write(target, "\n".join(lines).rstrip() + "\n", mode)
     atomic_write(state_file, json.dumps(state, indent=2, sort_keys=True) + "\n", 0o600)
@@ -167,10 +163,11 @@ def remove() -> None:
     mode = stat.S_IMODE(target.stat().st_mode) if target.exists() else 0o644
     lines = text.splitlines()
     _, current = read_values(lines)
-    expected = {
-        "allow_token_by_default": MANAGED_VALUES["allow_token_by_default"],
-        "custom_picker_binary": str(state["installed_picker"]),
-    }
+    expected = {"custom_picker_binary": str(state["installed_picker"])}
+    # Compatibility with the initial 0.1.0 setup script, which also managed
+    # allow_token_by_default. New installs leave that user preference alone.
+    if "allow_token_by_default" in state.get("previous", {}):
+        expected["allow_token_by_default"] = "true"
 
     for key, installed_value in expected.items():
         value = current[key]

@@ -17,6 +17,7 @@ MICE_FRIENDLY_NAME = 0
 MICE_RTSP_PORT = 2
 MICE_SOURCE_ID = 3
 DEFAULT_SOURCE_ID = b"OmaCastSender001"
+SUPPORTED_ROKU_MODELS = frozenset({"32S331", "55S405", "65S451"})
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,7 @@ def parse_roku_device_info(payload: bytes | str) -> dict[str, Any]:
         "native_width": dimensions[0],
         "native_height": dimensions[1],
         "model": str(root.findtext("model-name") or "").strip(),
+        "vendor": str(root.findtext("vendor-name") or "").strip(),
     }
 
 
@@ -90,7 +92,17 @@ def enrich_receiver_details(receivers: list[Receiver]) -> list[Receiver]:
         return receivers
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(receivers))) as executor:
         details = list(executor.map(lambda item: probe_roku_device_info(item.address), receivers))
-    return [replace(receiver, **detail) if detail else receiver for receiver, detail in zip(receivers, details)]
+    supported = []
+    for receiver, detail in zip(receivers, details):
+        if not detail:
+            continue
+        if detail.get("vendor", "").casefold() != "tcl":
+            continue
+        if detail.get("model") not in SUPPORTED_ROKU_MODELS:
+            continue
+        receiver_detail = {key: value for key, value in detail.items() if key != "vendor"}
+        supported.append(replace(receiver, **receiver_detail))
+    return supported
 
 
 def choose_video_mode(address: str, quality: str = "auto") -> VideoMode:
