@@ -1,0 +1,66 @@
+name: Roku compatibility report
+description: Tell us whether OmaCast works with your Roku TV model.
+title: "[Compatibility]: "
+labels:
+  - compatibility
+body:
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Works
+        - Partially works
+        - Does not work
+    validations:
+      required: true
+  - type: input
+    id: vendor
+    attributes:
+      label: TV vendor
+      placeholder: TCL, Hisense, Roku, etc.
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: TV model
+      description: Find this under Settings → System → About.
+    validations:
+      required: true
+  - type: input
+    id: omarchy
+    attributes:
+      label: Omarchy version
+      description: Run `omarchy version`.
+    validations:
+      required: true
+  - type: checkboxes
+    id: sources
+    attributes:
+      label: Sources tested
+      options:
+        - label: Full screen
+        - label: Window
+        - label: Region
+        - label: Desktop audio
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Describe connection, video, audio, delay, and how the session ended.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Optional diagnostics
+      description: Paste relevant log lines only. Redact IP addresses, usernames, paths, and private screen content.
+      render: shell
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed private information and sensitive screen content from this report.
+          required: true

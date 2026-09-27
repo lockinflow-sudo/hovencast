@@ -80,19 +80,28 @@ class ReceiverProfileTest(unittest.TestCase):
         self.assertEqual(info["vendor"], "TCL")
 
     @mock.patch("omarchy_cast_protocol.probe_roku_device_info")
-    def test_discovery_filters_unverified_models(self, probe: mock.Mock) -> None:
+    def test_discovery_accepts_unlisted_roku_models_with_device_info(
+        self, probe: mock.Mock
+    ) -> None:
         receivers = [
-            Receiver("Supported", "192.168.1.10", 7250, "wlan0"),
-            Receiver("Unknown", "192.168.1.11", 7250, "wlan0"),
+            Receiver("Tested", "192.168.1.10", 7250, "wlan0"),
+            Receiver("Untested", "192.168.1.11", 7250, "wlan0"),
+            Receiver("Unverified", "192.168.1.12", 7250, "wlan0"),
         ]
         probe.side_effect = [
             {"vendor": "TCL", "model": "32S331", "native_width": 1280, "native_height": 720},
-            {"vendor": "Other", "model": "Fake", "native_width": 1920, "native_height": 1080},
+            {"vendor": "Hisense", "model": "R6", "native_width": 1920, "native_height": 1080},
+            {},
         ]
 
         supported = enrich_receiver_details(receivers)
 
-        self.assertEqual([receiver.address for receiver in supported], ["192.168.1.10"])
+        self.assertEqual(
+            [receiver.address for receiver in supported],
+            ["192.168.1.10", "192.168.1.11"],
+        )
+        self.assertEqual(supported[1].vendor, "Hisense")
+        self.assertEqual(supported[1].model, "R6")
 
     @mock.patch("omarchy_cast_protocol.probe_roku_device_info")
     def test_auto_mode_matches_720p_roku_panel(self, probe: mock.Mock) -> None:

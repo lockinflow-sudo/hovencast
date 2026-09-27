@@ -3,16 +3,18 @@
 OmaCast is an Omarchy bar plugin for sharing a screen, window, or selected area,
 with desktop audio, to a compatible Roku TV on the same local network.
 
-Version 0.1.0 is deliberately narrow. It supports the three physically tested
-TCL Roku models—32S331, 55S405, and 65S451—using Miracast over Infrastructure
-(MICE). Fire TV, Wi-Fi Direct, Google Cast, AirPlay, other Roku models, and
-non-Roku receivers are not supported in this release.
+Version 0.1.0 uses Miracast over Infrastructure (MICE). It has been physically
+tested with TCL Roku models 32S331, 55S405, and 65S451. Other Roku TVs that
+advertise MICE and provide valid Roku device information are shown as
+compatible candidates, but still need community testing. Fire TV, Wi-Fi
+Direct, Google Cast, AirPlay, and non-Roku receivers are not supported.
 
 ## Requirements
 
 - A current Omarchy installation using the Quattro shell and Hyprland portal.
-- A TCL Roku TV with **Settings → System → Screen mirroring → Screen mirroring
-  mode** set to Prompt or Always allow.
+- A Roku TV with **Settings → System → Screen mirroring → Screen mirroring
+  mode** set to Prompt or Always allow. Models other than the three listed
+  above are community-tested rather than confirmed.
 - The computer and TV on the same LAN, with multicast discovery available.
 - An Arch package mirror reachable during setup if any dependency is missing.
 
@@ -82,9 +84,18 @@ session under `$XDG_RUNTIME_DIR/omacast/` and normally disappears at logout.
 See [SECURITY.md](SECURITY.md) for the trust model, residual risks, and private
 reporting guidance.
 
+## Compatibility reports
+
+If your Roku model works—or does not—please open a
+[compatibility report](https://github.com/lockinflow-sudo/omacast/issues/new?template=compatibility-report.yml).
+Include the TV vendor and model, Omarchy version, and which source types you
+tested. Please redact local IP addresses, usernames, and anything visible in a
+screen capture before attaching diagnostics.
+
 ## Known limitations
 
-- Only TCL Roku models 32S331, 55S405, and 65S451 are shown in 0.1.0.
+- TCL Roku models 32S331, 55S405, and 65S451 are the only physically tested
+  receivers in 0.1.0. Other discovered Roku models may or may not work.
 - Discovery depends on Roku MICE advertisement and local multicast traffic.
 - 720p and 1080p Roku modes are selected automatically; other resolutions are
   not supported.

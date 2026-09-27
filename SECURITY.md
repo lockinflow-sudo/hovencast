@@ -12,9 +12,10 @@ exposure to other devices on the LAN, but IP matching is not cryptographic
 authentication. A hostile device with control of the local network could still
 attempt impersonation or traffic interception.
 
-The supported receiver list is intentionally limited to the physically tested
-TCL Roku models 32S331, 55S405, and 65S451. A receiver's advertised identity is
-useful compatibility filtering, not a security credential.
+The receiver list requires both a MICE advertisement and valid Roku ECP device
+information. TCL Roku models 32S331, 55S405, and 65S451 are physically tested;
+other models are compatibility candidates. A receiver's advertised identity
+is useful compatibility filtering, not a security credential.
 
 ## Local integration
 

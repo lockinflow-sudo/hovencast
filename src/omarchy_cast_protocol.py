@@ -17,7 +17,6 @@ MICE_FRIENDLY_NAME = 0
 MICE_RTSP_PORT = 2
 MICE_SOURCE_ID = 3
 DEFAULT_SOURCE_ID = b"OmaCastSender001"
-SUPPORTED_ROKU_MODELS = frozenset({"32S331", "55S405", "65S451"})
 
 
 @dataclass(frozen=True)
@@ -30,6 +29,7 @@ class Receiver:
     native_width: int | None = None
     native_height: int | None = None
     model: str = ""
+    vendor: str = ""
 
     def json(self) -> dict[str, Any]:
         return asdict(self)
@@ -94,14 +94,12 @@ def enrich_receiver_details(receivers: list[Receiver]) -> list[Receiver]:
         details = list(executor.map(lambda item: probe_roku_device_info(item.address), receivers))
     supported = []
     for receiver, detail in zip(receivers, details):
+        # A resolved MICE advertisement is only shown after the device also
+        # answers Roku's ECP device-info endpoint with a usable resolution.
+        # Model names are compatibility metadata, not a security boundary.
         if not detail:
             continue
-        if detail.get("vendor", "").casefold() != "tcl":
-            continue
-        if detail.get("model") not in SUPPORTED_ROKU_MODELS:
-            continue
-        receiver_detail = {key: value for key, value in detail.items() if key != "vendor"}
-        supported.append(replace(receiver, **receiver_detail))
+        supported.append(replace(receiver, **detail))
     return supported
 
 
