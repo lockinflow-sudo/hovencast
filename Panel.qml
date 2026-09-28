@@ -165,8 +165,7 @@ Panel {
     sourceSelectedWindowHandle = String(sourceWindows[index].handle || "")
     if (sourceSelectedWindowHandle === "") return
     sourceSelection = "window"
-    sourcePickerPage = "ready"
-    sourceCursor = 1
+    finishSourcePicker("window:" + sourceSelectedWindowHandle)
   }
 
   function startSelectedSource() {
@@ -805,7 +804,7 @@ Panel {
               visible: root.sourcePickerPage === "windows"
               width: parent.width
               text: root.sourceWindows.length > 0
-                ? "Choose the application window you want to show."
+                ? "Choose the application window you want to show. Sharing starts when you select it."
                 : "No shareable application windows are open."
               color: root.dim
               font.family: root.fontFamily
