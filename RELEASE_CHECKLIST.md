@@ -25,7 +25,7 @@
 
 - [x] Preserve picker metadata until the backend consumes it.
 - [x] Pass the picker/backend handoff regression test.
-- [ ] Validate a live window cast and clean audio restoration.
-- [ ] Refresh the marketplace preview with the v0.1.1 UI.
+- [x] Validate a live window cast to the 65-inch TCL Roku TV and clean audio restoration.
+- [x] Refresh the marketplace preview with the v0.1.1 UI.
 - [ ] Create and push the public GitHub `v0.1.1` release.
 - [ ] Update marketplace submission [#9033](https://github.com/omacom/omarchy-plugin-marketplace/issues/9033).
