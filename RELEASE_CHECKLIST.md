@@ -1,4 +1,4 @@
-# OmaCast 0.1.0 release checklist
+# HovenCast release checklist
 
 ## Complete locally
 
@@ -6,7 +6,7 @@
 - [x] Backend source and build script included; no prebuilt helper required.
 - [x] No hard-coded development checkout paths.
 - [x] Portal picker setup preserves prior configuration.
-- [x] Uninstall restores only OmaCast-owned portal values.
+- [x] Uninstall restores only HovenCast-owned portal values.
 - [x] README documents dependencies, setup, removal, privacy, and Roku-only scope.
 - [x] MIT license included.
 - [x] Recordings, build products, caches, and prototype work excluded.
@@ -29,3 +29,12 @@
 - [x] Refresh the marketplace preview with the v0.1.1 UI.
 - [x] Create and push the public GitHub `v0.1.1` release.
 - [x] Update marketplace submission [#9033](https://github.com/omacom/omarchy-plugin-marketplace/issues/9033).
+
+## HovenCast rebrand
+
+- [x] Rename the user-facing application while preserving the `hoven.cast` plugin ID and existing runtime paths.
+- [x] Rename the GitHub repository to `lockinflow-sudo/hovencast`.
+- [ ] Update marketplace issue #9033.
+- [ ] Install and verify the renamed widget locally.
+- [ ] Replace the preview image so it shows the renamed UI.
+- [ ] Publish a new release after outstanding marketplace review findings are resolved.

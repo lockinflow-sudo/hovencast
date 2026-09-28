@@ -121,13 +121,13 @@ def install(picker: pathlib.Path) -> None:
     if state_file.exists():
         state = json.loads(state_file.read_text(encoding="utf-8"))
         if pathlib.Path(state["config"]) != target:
-            raise RuntimeError(f"saved OmaCast state belongs to {state['config']}, not {target}")
+            raise RuntimeError(f"saved HovenCast state belongs to {state['config']}, not {target}")
         _, current = read_values(lines)
         old_picker = str(state["installed_picker"])
         current_picker = current["custom_picker_binary"]
         if current_picker["present"] and current_picker["value"] not in {old_picker, str(picker)}:
             raise RuntimeError(
-                "custom_picker_binary changed after OmaCast setup; remove or reconcile it before reinstalling"
+                "custom_picker_binary changed after HovenCast setup; remove or reconcile it before reinstalling"
             )
         state["installed_picker"] = str(picker)
     else:
@@ -154,7 +154,7 @@ def remove() -> None:
     state_file = state_root / "portal.json"
     backup_file = state_root / "xdph.conf.before-omacast"
     if not state_file.exists():
-        print("No saved OmaCast portal state; nothing to restore")
+        print("No saved HovenCast portal state; nothing to restore")
         return
 
     state = json.loads(state_file.read_text(encoding="utf-8"))
@@ -197,7 +197,7 @@ def remove() -> None:
         state_root.rmdir()
     except OSError:
         pass
-    print(f"Restored OmaCast-managed settings in {target}")
+    print(f"Restored HovenCast-managed settings in {target}")
 
 
 def main() -> int:

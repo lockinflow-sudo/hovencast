@@ -41,7 +41,7 @@ def runtime_root(required: bool = False) -> pathlib.Path | None:
     value = os.environ.get("XDG_RUNTIME_DIR", "").strip()
     if not value:
         if required:
-            raise RuntimeError("OmaCast requires XDG_RUNTIME_DIR")
+            raise RuntimeError("HovenCast requires XDG_RUNTIME_DIR")
         return None
     root = pathlib.Path(value) / "omacast"
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -327,9 +327,9 @@ def recover_orphan_audio_route() -> None:
         route.sink_name = str(state["sink_name"])
         route.module_id = int(state["module_id"])
         route.stop(announce=False)
-        print("Recovered audio routing left by an interrupted OmaCast session", file=sys.stderr)
+        print("Recovered audio routing left by an interrupted HovenCast session", file=sys.stderr)
     except (KeyError, TypeError, ValueError, json.JSONDecodeError, OSError, subprocess.SubprocessError) as error:
-        print(f"Could not recover interrupted OmaCast audio routing: {error}", file=sys.stderr)
+        print(f"Could not recover interrupted HovenCast audio routing: {error}", file=sys.stderr)
 
 
 @dataclass
@@ -1284,13 +1284,14 @@ def run_cast_live(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Cast an Omarchy desktop to a supported Roku TV")
-    parser.add_argument("--version", action="version", version=f"OmaCast {APP_VERSION}")
+    parser.add_argument("--version", action="version", version=f"HovenCast {APP_VERSION}")
     subparsers = parser.add_subparsers(dest="command", required=True)
     discover = subparsers.add_parser("discover", help="discover Miracast-over-LAN receivers")
     discover.set_defaults(func=run_discover)
     cast_live = subparsers.add_parser("cast-live", help="share a portal-selected monitor live over WFD/MICE")
     cast_live.add_argument("--address", required=True)
-    cast_live.add_argument("--name", default="OmaCast")
+    cast_live.add_argument("--name", default="HovenCast")
+    # Keep the original sender ID so Roku approvals survive the HovenCast rename.
     cast_live.add_argument("--source-id", default="OmaCastSender001")
     cast_live.add_argument("--duration", type=int, default=120, help="seconds to stream; 0 runs until interrupted")
     cast_live.add_argument(

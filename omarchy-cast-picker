@@ -11,7 +11,7 @@ for argument in "$@"; do
 done
 
 if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
-  echo "OmaCast picker requires XDG_RUNTIME_DIR" >&2
+  echo "HovenCast picker requires XDG_RUNTIME_DIR" >&2
   exit 1
 fi
 
@@ -59,7 +59,7 @@ for ((attempt = 0; attempt < 3000; attempt++)); do
       mv -f "$selection_file.tmp" "$selection_file"
       selection_committed=1
       if [[ "$result" == window:* ]]; then
-        # Use the stable monitor portal stream. OmaCast crops it to the chosen
+        # Use the stable monitor portal stream. HovenCast crops it to the chosen
         # window and follows that window as its geometry changes.
         printf '[SELECTION]%s/screen:%s\n' "$allow_token" "$output"
       else

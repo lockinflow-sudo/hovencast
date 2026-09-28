@@ -396,7 +396,7 @@ Panel {
     }
   }
 
-  component OmaCastSymbol: Canvas {
+  component HovenCastSymbol: Canvas {
     property color iconColor: root.foreground
 
     implicitWidth: Style.font.display
@@ -494,7 +494,7 @@ Panel {
     bar: root.bar
     text: ""
     iconComponent: Component {
-      OmaCastSymbol {
+      HovenCastSymbol {
         anchors.fill: parent
         iconColor: root.sessionState === "error"
           ? root.urgent
@@ -505,8 +505,8 @@ Panel {
     active: root.sessionState === "error"
     activeColor: root.urgent
     tooltipText: root.sessionActive
-      ? "OmaCast v" + root.version + " · sharing"
-      : "OmaCast v" + root.version
+      ? "HovenCast v" + root.version + " · sharing"
+      : "HovenCast v" + root.version
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton && root.sessionActive) root.stopCasting()
       else root.toggle()
@@ -565,12 +565,12 @@ Panel {
 
             PanelHero {
               width: parent.width
-              title: "OmaCast v" + root.version
+              title: "HovenCast v" + root.version
               meta: root.sourcePickerPage === "windows" ? "CHOOSE A WINDOW" : "READY TO SHARE"
               foreground: root.foreground
               fontFamily: root.fontFamily
               iconComponent: Component {
-                OmaCastSymbol {
+                HovenCastSymbol {
                   iconColor: root.foreground
                 }
               }
@@ -903,7 +903,7 @@ Panel {
 
           PanelHero {
             width: parent.width
-            title: "OmaCast v" + root.version
+            title: "HovenCast v" + root.version
             meta: root.activeName !== ""
               ? root.activeName + " · " + Model.stateLabel(root.sessionState)
               : Model.stateLabel(root.sessionState)
@@ -912,7 +912,7 @@ Panel {
             fontFamily: root.fontFamily
             iconOpacity: root.sessionActive ? 1.0 : 0.65
             iconComponent: Component {
-              OmaCastSymbol {
+              HovenCastSymbol {
                 iconColor: root.sessionState === "error" ? root.urgent : root.foreground
               }
             }
@@ -1169,7 +1169,7 @@ Panel {
             width: parent.width
             text: root.sessionActive
               ? "Right-click the bar icon or press S here to stop sharing."
-              : "Select a display, then choose what you want to share in OmaCast."
+              : "Select a display, then choose what you want to share in HovenCast."
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption

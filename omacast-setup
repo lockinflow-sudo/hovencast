@@ -48,4 +48,4 @@ python -c 'import gi; gi.require_version("Gst", "1.0"); gi.require_version("Xdp"
 python "$root/scripts/portal_config.py" install --picker "$root/omarchy-cast-picker"
 systemctl --user restart xdg-desktop-portal-hyprland.service xdg-desktop-portal.service
 
-echo "OmaCast setup complete. The backend was built locally and the portal picker is active."
+echo "HovenCast setup complete. The backend was built locally and the portal picker is active."

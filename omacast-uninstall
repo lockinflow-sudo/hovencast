@@ -5,11 +5,11 @@ set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 if pgrep -af "$root/omarchy-cast" >/dev/null 2>&1; then
-  echo "OmaCast is still running. Stop casting and disable hoven.cast before uninstalling." >&2
+  echo "HovenCast is still running. Stop casting and disable hoven.cast before uninstalling." >&2
   exit 1
 fi
 
 python "$root/scripts/portal_config.py" remove
 systemctl --user restart xdg-desktop-portal-hyprland.service xdg-desktop-portal.service
 
-echo "OmaCast portal configuration restored. You can now run: omarchy plugin remove hoven.cast"
+echo "HovenCast portal configuration restored. You can now run: omarchy plugin remove hoven.cast"

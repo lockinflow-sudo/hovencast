@@ -1,7 +1,11 @@
-# OmaCast
+# HovenCast
 
-OmaCast is an Omarchy bar plugin for sharing a screen, window, or selected area,
+HovenCast is an Omarchy bar plugin for sharing a screen, window, or selected area,
 with desktop audio, to a compatible Roku TV on the same local network.
+
+Previously published as OmaCast. The installed plugin ID (`hoven.cast`),
+command names, and runtime paths remain unchanged so existing installations
+can update without reinstalling.
 
 Version 0.1.1 uses Miracast over Infrastructure (MICE). It has been physically
 tested with TCL Roku models 32S331, 55S405, and 65S451. Other Roku TVs that
@@ -20,13 +24,13 @@ Direct, Google Cast, AirPlay, and non-Roku receivers are not supported.
 
 The setup script installs missing packages through `omarchy pkg add`, builds the
 small WFD/RTSP helper from included C source, and configures
-`xdg-desktop-portal-hyprland` to use OmaCast's source picker. No prebuilt binary
+`xdg-desktop-portal-hyprland` to use HovenCast's source picker. No prebuilt binary
 or recording is included.
 
 ## Install
 
 ```sh
-omarchy plugin add https://github.com/lockinflow-sudo/omacast.git --enable
+omarchy plugin add https://github.com/lockinflow-sudo/hovencast.git --enable
 ~/.config/omarchy/plugins/hoven.cast/omacast-setup
 ```
 
@@ -41,17 +45,17 @@ Setup changes only `custom_picker_binary`; it preserves your existing
 1. Click the cast icon in the Omarchy bar.
 2. Choose a discovered Roku TV.
 3. Approve the sender on the TV if prompted.
-4. Choose a screen, window, or area in the OmaCast picker.
+4. Choose a screen, window, or area in the HovenCast picker.
 5. Right-click the bar icon to stop.
 
 Audio moves to the TV while casting by default and is restored afterward.
 Enable **Keep audio on this computer** in the widget settings to play it
-locally too. If OmaCast or the computer is interrupted before cleanup, the next
-OmaCast command recovers audio routing left by the interrupted session.
+locally too. If HovenCast or the computer is interrupted before cleanup, the next
+HovenCast command recovers audio routing left by the interrupted session.
 
 Window sharing captures the selected monitor and crops it to the chosen window,
 following that window as its geometry changes. Keep private windows off that
-monitor while sharing. The portal picker is system-wide while OmaCast is
+monitor while sharing. The portal picker is system-wide while HovenCast is
 installed, so it also appears for screen-sharing requests from other apps.
 
 ## Remove
@@ -64,7 +68,7 @@ omarchy plugin disable hoven.cast
 omarchy plugin remove hoven.cast
 ```
 
-The uninstaller restores only values still owned by OmaCast. If you changed a
+The uninstaller restores only values still owned by HovenCast. If you changed a
 managed value after setup, it leaves that value alone instead of overwriting
 your newer configuration.
 
@@ -74,7 +78,7 @@ restore state is kept outside the plugin directory.
 
 ## Privacy and files
 
-OmaCast streams directly to the selected TV on the local network and does not
+HovenCast streams directly to the selected TV on the local network and does not
 upload the capture. Its RTSP listener binds only to the receiver-facing local
 address and rejects connections not originating from the selected TV. It does
 not save screen recordings. The picker preview is deleted as soon as selection
@@ -87,7 +91,7 @@ reporting guidance.
 ## Compatibility reports
 
 If your Roku model works—or does not—please open a
-[compatibility report](https://github.com/lockinflow-sudo/omacast/issues/new?template=compatibility-report.yml).
+[compatibility report](https://github.com/lockinflow-sudo/hovencast/issues/new?template=compatibility-report.yml).
 Include the TV vendor and model, Omarchy version, and which source types you
 tested. Please redact local IP addresses, usernames, and anything visible in a
 screen capture before attaching diagnostics.
@@ -102,7 +106,7 @@ screen capture before attaching diagnostics.
 - Receiver reconnect, network-roaming, suspend/resume, and long-duration
   reliability need broader field testing.
 - The custom picker changes the portal picker for all applications until
-  OmaCast is uninstalled.
+  HovenCast is uninstalled.
 
 ## Development and validation
 

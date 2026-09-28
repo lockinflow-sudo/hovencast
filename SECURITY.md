@@ -2,7 +2,7 @@
 
 ## Trust model
 
-OmaCast is intended for a trusted local network. Starting a cast sends the
+HovenCast is intended for a trusted local network. Starting a cast sends the
 selected screen content and desktop audio directly to the TV selected in the
 widget. No cloud service is used.
 
@@ -21,7 +21,7 @@ is useful compatibility filtering, not a security credential.
 
 The setup script installs dependencies using Omarchy's package helper, builds
 the included C source locally, and configures the Hyprland portal to use the
-OmaCast picker. The picker is system-wide while the plugin is installed and can
+HovenCast picker. The picker is system-wide while the plugin is installed and can
 therefore appear when other applications request screen sharing. Setup does not
 enable portal restore tokens automatically.
 
@@ -33,7 +33,7 @@ that monitor, when this distinction matters.
 Temporary picker images, session logs, and crash-recovery state live under
 `$XDG_RUNTIME_DIR/omacast/` with user-only permissions. The picker image is
 deleted after selection, and the runtime directory normally disappears at
-logout. OmaCast does not intentionally create screen-recording files.
+logout. HovenCast does not intentionally create screen-recording files.
 
 ## Reporting a vulnerability
 
