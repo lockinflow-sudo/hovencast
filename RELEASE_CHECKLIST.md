@@ -34,7 +34,7 @@
 
 - [x] Rename the user-facing application while preserving the `hoven.cast` plugin ID and existing runtime paths.
 - [x] Rename the GitHub repository to `lockinflow-sudo/hovencast`.
-- [ ] Update marketplace issue #9033.
+- [x] Update marketplace issue #9033 with the HovenCast name and new repository URL.
 - [ ] Install and verify the renamed widget locally.
 - [ ] Replace the preview image so it shows the renamed UI.
 - [ ] Publish a new release after outstanding marketplace review findings are resolved.
