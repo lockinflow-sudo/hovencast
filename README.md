@@ -120,6 +120,8 @@ qmllint -I "$OMARCHY_PATH/shell" Panel.qml
 
 The repository intentionally ignores local builds, Python caches, event logs,
 and transport streams.
+The marketplace preview is based on the live panel, with its local network
+address redacted.
 
 ## License
 
