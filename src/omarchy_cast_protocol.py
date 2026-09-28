@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import concurrent.futures
 import http.client
+import os
 import re
+import select
 import socket
 import struct
 import subprocess
+import time
 import xml.etree.ElementTree as ET
 from typing import Any, BinaryIO
 from dataclasses import asdict, dataclass, replace
@@ -17,6 +20,10 @@ MICE_FRIENDLY_NAME = 0
 MICE_RTSP_PORT = 2
 MICE_SOURCE_ID = 3
 DEFAULT_SOURCE_ID = b"OmaCastSender001"
+MAX_AVAHI_OUTPUT_BYTES = 65_536
+MAX_AVAHI_LINE_BYTES = 4_096
+MAX_AVAHI_RECORDS = 256
+MAX_MICE_RECEIVERS = 64
 
 
 @dataclass(frozen=True)
@@ -144,34 +151,67 @@ def decode_avahi_name(value: str) -> str:
     return re.sub(r"\\(\d{3})", lambda match: chr(int(match.group(1), 10)), value)
 
 
-def discover_mice_receivers(timeout: int = 4) -> list[Receiver]:
+def _read_avahi_output(timeout: float, command: list[str] | None = None) -> bytes:
+    # communicate() and run(..., stdout=PIPE) buffer without a size ceiling.
+    # Read only a bounded amount, even if a network responder floods Avahi.
+    process = subprocess.Popen(
+        command or ["avahi-browse", "-rtp", "_display._tcp"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    assert process.stdout is not None
+    output = bytearray()
+    deadline = time.monotonic() + max(0.0, timeout)
     try:
-        result = subprocess.run(
-            ["avahi-browse", "-rtp", "_display._tcp"],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            timeout=timeout,
-            check=False,
-        )
-        output = result.stdout
-    except subprocess.TimeoutExpired as error:
-        # Some receivers advertise immediately but never finish address
-        # resolution. Avahi then outlives the discovery window even though its
-        # stdout already contains valid resolved entries. Keep those entries
-        # instead of turning one slow receiver into a total discovery failure.
-        partial = error.stdout or ""
-        output = partial.decode("utf-8", "replace") if isinstance(partial, bytes) else partial
+        while len(output) < MAX_AVAHI_OUTPUT_BYTES:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            readable, _, _ = select.select([process.stdout], [], [], remaining)
+            if not readable:
+                break
+            chunk = os.read(process.stdout.fileno(), min(4096, MAX_AVAHI_OUTPUT_BYTES - len(output)))
+            if not chunk:
+                break
+            output.extend(chunk)
+    finally:
+        process.stdout.close()
+        if process.poll() is None:
+            process.terminate()
+        try:
+            process.wait(timeout=0.5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=0.5)
+    return bytes(output)
+
+
+def discover_mice_receivers(timeout: int = 4) -> list[Receiver]:
+    # A slow receiver may leave Avahi running after valid entries arrive.
+    # Keep complete entries already read, but never retain unbounded output.
+    output = _read_avahi_output(timeout)
+    complete_output = output.rsplit(b"\n", 1)[0] if b"\n" in output else b""
     receivers: dict[tuple[str, int], Receiver] = {}
-    for line in output.splitlines():
+    for line in complete_output.split(b"\n", MAX_AVAHI_RECORDS)[:MAX_AVAHI_RECORDS]:
+        if len(line) > MAX_AVAHI_LINE_BYTES:
+            continue
+        line = line.decode("utf-8", "replace").rstrip("\r")
         fields = line.split(";")
         if len(fields) < 9 or fields[0] != "=":
             continue
         interface, family, name, address, port_text = fields[1], fields[2], fields[3], fields[7], fields[8]
         if family != "IPv4":
             continue
-        receiver = Receiver(decode_avahi_name(name), address, int(port_text), interface)
+        try:
+            port = int(port_text)
+        except ValueError:
+            continue
+        if not 0 < port < 65536:
+            continue
+        receiver = Receiver(decode_avahi_name(name), address, port, interface)
         receivers[(receiver.address, receiver.port)] = receiver
+        if len(receivers) >= MAX_MICE_RECEIVERS:
+            break
     return sorted(receivers.values(), key=lambda item: (item.name.casefold(), item.address))
 
 

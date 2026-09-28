@@ -2,9 +2,9 @@
 
 import pathlib
 import io
-import subprocess
 import struct
 import sys
+import time
 import unittest
 from unittest import mock
 
@@ -13,6 +13,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 from omarchy_cast_protocol import (  # noqa: E402
     Receiver,
     RtspMessage,
+    MAX_AVAHI_OUTPUT_BYTES,
+    MAX_AVAHI_LINE_BYTES,
+    MAX_MICE_RECEIVERS,
+    _read_avahi_output,
     build_mice_source_ready,
     choose_video_mode,
     decode_avahi_name,
@@ -49,23 +53,55 @@ class AvahiDecodeTest(unittest.TestCase):
     def test_decimal_escapes(self) -> None:
         self.assertEqual(decode_avahi_name(r"55\034\032TCL\032Roku\032TV"), '55" TCL Roku TV')
 
-    @mock.patch("omarchy_cast_protocol.subprocess.run")
-    def test_discovery_keeps_resolved_entries_after_timeout(self, run: mock.Mock) -> None:
+    @mock.patch("omarchy_cast_protocol._read_avahi_output")
+    def test_discovery_keeps_resolved_entries_after_timeout(self, read_output: mock.Mock) -> None:
         partial = (
             "=;wlan0;IPv4;55\\034\\032TCL\\032Roku\\032TV;_display._tcp;local;"
             "roku.local;192.168.1.225;7250;\n"
         )
-        run.side_effect = subprocess.TimeoutExpired(
-            ["avahi-browse"],
-            4,
-            output=partial.encode(),
-        )
+        read_output.return_value = partial.encode()
 
         receivers = discover_mice_receivers()
 
         self.assertEqual(len(receivers), 1)
         self.assertEqual(receivers[0].name, '55" TCL Roku TV')
         self.assertEqual(receivers[0].address, "192.168.1.225")
+
+    def test_reader_caps_flooded_output(self) -> None:
+        script = "import sys,time; sys.stdout.buffer.write(b'x' * 131072); sys.stdout.flush(); time.sleep(2)"
+        started = time.monotonic()
+        output = _read_avahi_output(1, [sys.executable, "-c", script])
+
+        self.assertEqual(len(output), MAX_AVAHI_OUTPUT_BYTES)
+        self.assertLess(time.monotonic() - started, 1)
+
+    def test_reader_keeps_complete_lines_on_timeout(self) -> None:
+        script = (
+            "import sys,time; sys.stdout.buffer.write(b'=;wlan0;IPv4;TV;_display._tcp;"
+            "local;tv.local;192.168.1.10;7250;\\n'); sys.stdout.flush(); time.sleep(2)"
+        )
+        started = time.monotonic()
+        output = _read_avahi_output(0.1, [sys.executable, "-c", script])
+
+        self.assertIn(b"192.168.1.10;7250;\n", output)
+        self.assertLess(time.monotonic() - started, 1)
+
+    @mock.patch("omarchy_cast_protocol._read_avahi_output")
+    def test_discovery_skips_oversized_line_and_invalid_port(self, read_output: mock.Mock) -> None:
+        oversized = b"=" + b"x" * MAX_AVAHI_LINE_BYTES + b"\n"
+        invalid_port = b"=;wlan0;IPv4;TV;_display._tcp;local;tv.local;192.168.1.10;bad;\n"
+        read_output.return_value = oversized + invalid_port
+
+        self.assertEqual(discover_mice_receivers(), [])
+
+    @mock.patch("omarchy_cast_protocol._read_avahi_output")
+    def test_discovery_caps_receiver_count(self, read_output: mock.Mock) -> None:
+        read_output.return_value = b"".join(
+            f"=;wlan0;IPv4;TV{i};_display._tcp;local;tv.local;192.168.1.{i};7250;\n".encode()
+            for i in range(1, MAX_MICE_RECEIVERS + 10)
+        )
+
+        self.assertEqual(len(discover_mice_receivers()), MAX_MICE_RECEIVERS)
 
 
 class ReceiverProfileTest(unittest.TestCase):

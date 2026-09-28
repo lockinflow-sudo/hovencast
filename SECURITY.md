@@ -16,6 +16,8 @@ The receiver list requires both a MICE advertisement and valid Roku ECP device
 information. TCL Roku models 32S331, 55S405, and 65S451 are physically tested;
 other models are compatibility candidates. A receiver's advertised identity
 is useful compatibility filtering, not a security credential.
+Discovery limits the amount of Avahi output it reads, along with individual
+record lengths and the number of candidate receivers, before probing devices.
 
 ## Local integration
 

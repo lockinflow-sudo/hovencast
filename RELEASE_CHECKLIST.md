@@ -38,3 +38,10 @@
 - [x] Install and verify the renamed widget locally.
 - [x] Replace the preview image so it shows the renamed UI with the address redacted.
 - [ ] Publish a new release after outstanding marketplace review findings are resolved.
+
+## Marketplace discovery-output finding
+
+- [x] Bound Avahi discovery output, record lengths, and receiver count.
+- [x] Test flooded output, timeout with valid partial output, malformed records, and receiver cap.
+- [x] Confirm live Roku discovery still finds the available TVs.
+- [ ] Get marketplace reviewer confirmation before tagging the next release.
