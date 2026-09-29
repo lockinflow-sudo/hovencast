@@ -393,22 +393,16 @@ class SilentAudioRoute:
             self.laptop_sink_id = sink_ids.get(self.previous_sink, "")
         if not self.cast_sink_id or not self.laptop_sink_id:
             return
-        new_input_ids = {
-            str(item.get("index", ""))
-            for item in inputs
-            if str(item.get("index", "")) not in self.input_workspaces
-        }
         client_workspaces: dict[int, set[str]] = {}
-        if new_input_ids:
-            clients = self._json_command(["hyprctl", "-j", "clients"])
-            for client in clients:
-                try:
-                    client_pid = int(client.get("pid", 0))
-                except (TypeError, ValueError):
-                    continue
-                workspace = str((client.get("workspace") or {}).get("name", ""))
-                if client_pid > 0 and workspace and not workspace.startswith("special:"):
-                    client_workspaces.setdefault(client_pid, set()).add(workspace)
+        clients = self._json_command(["hyprctl", "-j", "clients"])
+        for client in clients:
+            try:
+                client_pid = int(client.get("pid", 0))
+            except (TypeError, ValueError):
+                continue
+            workspace = str((client.get("workspace") or {}).get("name", ""))
+            if client_pid > 0 and workspace and not workspace.startswith("special:"):
+                client_workspaces.setdefault(client_pid, set()).add(workspace)
         active_input_ids: set[str] = set()
         tv_inputs = 0
         laptop_inputs = 0
@@ -417,29 +411,31 @@ class SilentAudioRoute:
             if not input_id:
                 continue
             active_input_ids.add(input_id)
-            if input_id not in self.input_workspaces:
-                properties = sink_input.get("properties") or {}
-                try:
-                    stream_pid = int(properties.get("application.process.id", 0))
-                except (TypeError, ValueError):
-                    stream_pid = 0
-                candidates: set[str] = set()
-                for ancestor in process_ancestors(stream_pid):
-                    candidates.update(client_workspaces.get(ancestor, set()))
-                if len(candidates) == 1:
-                    workspace = next(iter(candidates))
-                elif focused_workspace in candidates:
-                    workspace = focused_workspace
-                elif tv_workspace in candidates:
-                    workspace = tv_workspace
-                else:
-                    workspace = focused_workspace or tv_workspace
+            properties = sink_input.get("properties") or {}
+            try:
+                stream_pid = int(properties.get("application.process.id", 0))
+            except (TypeError, ValueError):
+                stream_pid = 0
+            candidates: set[str] = set()
+            for ancestor in process_ancestors(stream_pid):
+                candidates.update(client_workspaces.get(ancestor, set()))
+            previous_workspace = self.input_workspaces.get(input_id, "")
+            if len(candidates) == 1:
+                workspace = next(iter(candidates))
+            elif focused_workspace in candidates:
+                workspace = focused_workspace
+            elif tv_workspace in candidates:
+                workspace = tv_workspace
+            else:
+                workspace = previous_workspace or focused_workspace or tv_workspace
+            if workspace != previous_workspace:
                 self.input_workspaces[input_id] = workspace
                 emit(
                     self.event_file,
                     "audio-stream-workspace",
                     input_id=input_id,
                     workspace=workspace,
+                    previous_workspace=previous_workspace,
                 )
             destination = (
                 self.sink_name

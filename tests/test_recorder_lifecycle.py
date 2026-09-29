@@ -251,7 +251,7 @@ class RecorderLifecycleTest(unittest.TestCase):
 
     @mock.patch("omarchy_cast.process_ancestors", return_value={101, 100})
     @mock.patch("omarchy_cast.subprocess.run")
-    def test_audio_stream_is_assigned_to_tv_workspace_where_it_started(
+    def test_audio_stream_is_assigned_to_current_window_workspace(
         self, run: mock.Mock, _ancestors: mock.Mock
     ) -> None:
         run.side_effect = [
@@ -312,6 +312,67 @@ class RecorderLifecycleTest(unittest.TestCase):
         self.assertEqual(route.input_workspaces, {"7": "2"})
         self.assertEqual(len(run.call_args_list), 4)
 
+    @mock.patch("omarchy_cast.process_ancestors", return_value={101, 100})
+    @mock.patch("omarchy_cast.subprocess.run")
+    def test_audio_follows_window_dragged_to_tv_workspace(
+        self, run: mock.Mock, _ancestors: mock.Mock
+    ) -> None:
+        monitors = [
+            {
+                "name": "eDP-1",
+                "focused": True,
+                "activeWorkspace": {"name": "1"},
+            },
+            {
+                "name": "HovenCast-TV",
+                "focused": False,
+                "activeWorkspace": {"name": "2"},
+            },
+        ]
+        laptop_input = [
+            {
+                "index": 7,
+                "sink": 20,
+                "properties": {"application.process.id": "101"},
+            }
+        ]
+        run.side_effect = [
+            subprocess.CompletedProcess([], 0, stdout=json.dumps(monitors)),
+            subprocess.CompletedProcess([], 0, stdout=json.dumps(laptop_input)),
+            subprocess.CompletedProcess(
+                [],
+                0,
+                stdout=json.dumps(
+                    [
+                        {"index": 10, "name": "cast"},
+                        {"index": 20, "name": "speakers"},
+                    ]
+                ),
+            ),
+            subprocess.CompletedProcess(
+                [], 0, stdout=json.dumps([{"pid": 100, "workspace": {"name": "1"}}])
+            ),
+            subprocess.CompletedProcess([], 0, stdout=json.dumps(monitors)),
+            subprocess.CompletedProcess([], 0, stdout=json.dumps(laptop_input)),
+            subprocess.CompletedProcess(
+                [], 0, stdout=json.dumps([{"pid": 100, "workspace": {"name": "2"}}])
+            ),
+            subprocess.CompletedProcess([], 0),
+        ]
+        route = SilentAudioRoute(io.StringIO())
+        route.sink_name = "cast"
+        route.previous_sink = "speakers"
+        route.module_id = 1
+
+        route.follow_workspace()
+        route.follow_workspace()
+
+        self.assertEqual(route.input_workspaces, {"7": "2"})
+        self.assertEqual(
+            run.call_args_list[-1].args[0],
+            ["pactl", "move-sink-input", "7", "cast"],
+        )
+
     @mock.patch("omarchy_cast.subprocess.run")
     def test_audio_returns_to_laptop_when_its_workspace_leaves_tv(
         self, run: mock.Mock
@@ -350,6 +411,7 @@ class RecorderLifecycleTest(unittest.TestCase):
                     ]
                 ),
             ),
+            subprocess.CompletedProcess([], 0, stdout="[]"),
             subprocess.CompletedProcess([], 0),
         ]
         route = SilentAudioRoute(io.StringIO())
