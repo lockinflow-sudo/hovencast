@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
 import pathlib
+import re
 import shutil
 import signal
 import subprocess
@@ -53,6 +56,68 @@ def runtime_root(required: bool = False) -> pathlib.Path | None:
 def audio_route_state_path() -> pathlib.Path | None:
     root = runtime_root()
     return root / "audio-route.json" if root else None
+
+
+def cast_session_path(name: str) -> pathlib.Path:
+    root = runtime_root(required=True)
+    assert root is not None
+    return root / name
+
+
+def atomic_json(path: pathlib.Path, payload: dict[str, Any]) -> None:
+    temporary = path.with_name(f".{path.name}.{os.getpid()}")
+    temporary.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.chmod(0o600)
+    os.replace(temporary, path)
+
+
+def process_start_ticks(pid: int) -> int | None:
+    try:
+        suffix = pathlib.Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").rsplit(")", 1)[1]
+        return int(suffix.split()[19])
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def session_process_is_running(state: dict[str, Any]) -> bool:
+    try:
+        pid = int(state["pid"])
+        expected_ticks = int(state["start_ticks"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return process_is_running(pid) and process_start_ticks(pid) == expected_ticks
+
+
+@contextlib.contextmanager
+def cast_session_lock() -> Any:
+    path = cast_session_path("cast-session.lock")
+    descriptor = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+
+
+def arm_picker_target(ipc_target: str) -> pathlib.Path:
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", ipc_target):
+        raise RuntimeError("invalid HovenCast picker IPC target")
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR", "").strip()
+    if not runtime_dir:
+        raise RuntimeError("HovenCast requires XDG_RUNTIME_DIR")
+    picker_root = pathlib.Path(runtime_dir) / "omacast-picker"
+    picker_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    picker_root.chmod(0o700)
+    target = picker_root / "ipc-target.json"
+    temporary = target.with_name(f".{target.name}.{os.getpid()}")
+    temporary.write_text(
+        json.dumps({"pid": os.getpid(), "target": ipc_target}, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary.chmod(0o600)
+    os.replace(temporary, target)
+    return target
 
 
 def process_is_running(pid: int) -> bool:
@@ -1212,6 +1277,7 @@ def run_cast_live(args: argparse.Namespace) -> int:
     video_mode = choose_video_mode(args.address, args.quality)
     virtual_workspace: VirtualWorkspace | None = None
     guard_process: subprocess.Popen[bytes] | None = None
+    picker_target_request: pathlib.Path | None = None
     if args.workspace:
         virtual_workspace = VirtualWorkspace()
         state = virtual_workspace.start(video_mode.width, video_mode.height, args.workspace)
@@ -1248,6 +1314,8 @@ def run_cast_live(args: argparse.Namespace) -> int:
             flush=True,
         )
     try:
+        if args.ipc_target:
+            picker_target_request = arm_picker_target(args.ipc_target)
         Gst.init(None)
         with tempfile.TemporaryDirectory(prefix="live-", dir=session_root) as runtime_dir:
             raw_transport_fifo = pathlib.Path(runtime_dir) / "raw-transport.ts"
@@ -1324,10 +1392,202 @@ def run_cast_live(args: argparse.Namespace) -> int:
                 )
                 return recorder.start()
     finally:
+        if picker_target_request:
+            picker_target_request.unlink(missing_ok=True)
         if virtual_workspace:
             virtual_workspace.stop()
         if guard_process and guard_process.poll() is None:
             guard_process.terminate()
+
+
+SESSION_FAILURE_EVENTS = {
+    "portal-create-failed",
+    "portal-start-failed",
+    "audio-route-failed",
+    "sender-start-failed",
+    "pipeline-create-failed",
+    "pipeline-error",
+    "transport-process-exited",
+    "output-stalled",
+}
+
+
+def read_cast_session_state() -> dict[str, Any]:
+    path = cast_session_path("cast-session.json")
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def read_cast_session_events(started_at: float) -> list[dict[str, Any]]:
+    path = cast_session_path("session.events.jsonl")
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    records: list[dict[str, Any]] = []
+    for line in lines[-2048:]:
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        try:
+            event_time = float(record.get("time", 0))
+        except (TypeError, ValueError):
+            event_time = 0
+        if event_time + 0.001 >= started_at:
+            records.append(record)
+    return records
+
+
+def cast_session_snapshot() -> dict[str, Any]:
+    state = read_cast_session_state()
+    if not state:
+        return {"running": False, "state": "idle"}
+    running = session_process_is_running(state)
+    started_at = float(state.get("started_at", 0) or 0)
+    records = read_cast_session_events(started_at)
+    metrics = next(
+        (record for record in reversed(records) if record.get("event") == "metrics"),
+        {},
+    )
+    failure = next(
+        (
+            record
+            for record in reversed(records)
+            if record.get("event") in SESSION_FAILURE_EVENTS
+        ),
+        {},
+    )
+    events = {str(record.get("event", "")) for record in records}
+    if running:
+        if int(metrics.get("video_frames", 0) or 0) > 0 or "first-video" in events:
+            phase = "streaming"
+        elif "portal-requested" in events and "portal-started" not in events:
+            phase = "awaiting-portal"
+        else:
+            phase = "connecting"
+    elif state.get("stop_requested"):
+        phase = "idle"
+    elif failure:
+        phase = "error"
+    else:
+        phase = "error"
+        failure = {"error": "The wireless display process exited unexpectedly."}
+    return {
+        "running": running,
+        "state": phase,
+        "pid": int(state.get("pid", 0) or 0),
+        "address": str(state.get("address", "")),
+        "receiver": str(state.get("receiver", "")),
+        "workspace": str(state.get("workspace", "")),
+        "video_frames": int(metrics.get("video_frames", 0) or 0),
+        "audio_buffers": int(metrics.get("audio_buffers", 0) or 0),
+        "bitrate_bps": int(metrics.get("bitrate_bps", 0) or 0),
+        "av_drift_ms": float(metrics.get("av_drift_ms", 0) or 0),
+        "error": str(failure.get("error", "")),
+    }
+
+
+def cast_live_command(args: argparse.Namespace) -> list[str]:
+    command = [
+        sys.executable,
+        str(pathlib.Path(__file__).resolve()),
+        "cast-live",
+        "--address",
+        args.address,
+        "--name",
+        args.name,
+        "--source-id",
+        args.source_id,
+        "--duration",
+        str(args.duration),
+        "--quality",
+        args.quality,
+    ]
+    if args.workspace:
+        command.extend(["--workspace", args.workspace])
+    if args.keep_local_audio:
+        command.append("--keep-local-audio")
+    if args.ipc_target:
+        command.extend(["--ipc-target", args.ipc_target])
+    return command
+
+
+def run_session_start(args: argparse.Namespace) -> int:
+    with cast_session_lock():
+        existing = read_cast_session_state()
+        if existing and session_process_is_running(existing):
+            raise RuntimeError("A HovenCast session is already running")
+        cast_session_path("session.events.jsonl").unlink(missing_ok=True)
+        log_path = cast_session_path("cast-session.log")
+        started_at = time.time()
+        with log_path.open("w", encoding="utf-8") as log_file:
+            log_path.chmod(0o600)
+            process = subprocess.Popen(
+                cast_live_command(args),
+                stdin=subprocess.DEVNULL,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                close_fds=True,
+            )
+        start_ticks = process_start_ticks(process.pid)
+        if start_ticks is None:
+            raise RuntimeError("The HovenCast session did not start")
+        state = {
+            "version": 1,
+            "pid": process.pid,
+            "start_ticks": start_ticks,
+            "started_at": started_at,
+            "address": args.address,
+            "receiver": args.receiver_name or args.address,
+            "workspace": args.workspace or "",
+            "stop_requested": False,
+        }
+        atomic_json(cast_session_path("cast-session.json"), state)
+    print(json.dumps(cast_session_snapshot(), sort_keys=True))
+    return 0
+
+
+def run_session_status(_args: argparse.Namespace) -> int:
+    print(json.dumps(cast_session_snapshot(), sort_keys=True))
+    return 0
+
+
+def run_session_stop(_args: argparse.Namespace) -> int:
+    with cast_session_lock():
+        state = read_cast_session_state()
+        if not state:
+            print(json.dumps({"running": False, "state": "idle"}, sort_keys=True))
+            return 0
+        state["stop_requested"] = True
+        atomic_json(cast_session_path("cast-session.json"), state)
+        pid = int(state.get("pid", 0) or 0)
+        if session_process_is_running(state):
+            try:
+                os.killpg(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            deadline = time.monotonic() + 5
+            while session_process_is_running(state) and time.monotonic() < deadline:
+                time.sleep(0.1)
+            if session_process_is_running(state):
+                try:
+                    os.killpg(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        try:
+            VirtualWorkspace().recover_stale()
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            pass
+        recover_orphan_audio_route()
+    print(json.dumps(cast_session_snapshot(), sort_keys=True))
+    return 0
 
 
 def run_workspace_list(_args: argparse.Namespace) -> int:
@@ -1398,6 +1658,37 @@ def run_workspace_guard(args: argparse.Namespace) -> int:
     return guard(args.pid)
 
 
+def add_cast_arguments(parser: argparse.ArgumentParser, *, detached: bool = False) -> None:
+    parser.add_argument("--address", required=True)
+    parser.add_argument("--name", default="HovenCast")
+    # Keep the original sender ID so Roku approvals survive the HovenCast rename.
+    parser.add_argument("--source-id", default="OmaCastSender001")
+    parser.add_argument(
+        "--duration",
+        type=int,
+        default=120,
+        help="seconds to stream; 0 runs until interrupted",
+    )
+    parser.add_argument(
+        "--quality",
+        choices=("auto", "720p", "1080p"),
+        default="auto",
+        help="video mode; auto uses Roku native panel information when available",
+    )
+    parser.add_argument(
+        "--workspace",
+        help="capture this workspace on a dedicated virtual output",
+    )
+    parser.add_argument(
+        "--keep-local-audio",
+        action="store_true",
+        help="also play desktop audio on the computer while casting",
+    )
+    parser.add_argument("--ipc-target", default="", help=argparse.SUPPRESS)
+    if detached:
+        parser.add_argument("--receiver-name", default="", help=argparse.SUPPRESS)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Cast an Omarchy desktop to a supported Roku TV")
     parser.add_argument("--version", action="version", version=f"HovenCast {APP_VERSION}")
@@ -1405,27 +1696,21 @@ def build_parser() -> argparse.ArgumentParser:
     discover = subparsers.add_parser("discover", help="discover Miracast-over-LAN receivers")
     discover.set_defaults(func=run_discover)
     cast_live = subparsers.add_parser("cast-live", help="share a portal-selected monitor live over WFD/MICE")
-    cast_live.add_argument("--address", required=True)
-    cast_live.add_argument("--name", default="HovenCast")
-    # Keep the original sender ID so Roku approvals survive the HovenCast rename.
-    cast_live.add_argument("--source-id", default="OmaCastSender001")
-    cast_live.add_argument("--duration", type=int, default=120, help="seconds to stream; 0 runs until interrupted")
-    cast_live.add_argument(
-        "--quality",
-        choices=("auto", "720p", "1080p"),
-        default="auto",
-        help="video mode; auto uses Roku native panel information when available",
-    )
-    cast_live.add_argument(
-        "--workspace",
-        help="capture this workspace on a dedicated virtual output",
-    )
-    cast_live.add_argument(
-        "--keep-local-audio",
-        action="store_true",
-        help="also play desktop audio on the computer while casting",
-    )
+    add_cast_arguments(cast_live)
     cast_live.set_defaults(func=run_cast_live)
+    session_start = subparsers.add_parser(
+        "session-start", help="start a detached wireless display session"
+    )
+    add_cast_arguments(session_start, detached=True)
+    session_start.set_defaults(func=run_session_start)
+    session_status = subparsers.add_parser(
+        "session-status", help="show the detached wireless display session"
+    )
+    session_status.set_defaults(func=run_session_status)
+    session_stop = subparsers.add_parser(
+        "session-stop", help="stop the detached wireless display session"
+    )
+    session_stop.set_defaults(func=run_session_stop)
     workspace_list = subparsers.add_parser(
         "workspace-list", help="list Hyprland workspaces"
     )

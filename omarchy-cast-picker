@@ -20,8 +20,20 @@ mkdir -p -m 700 "$runtime_root"
 chmod 700 "$runtime_root"
 selection_file="$runtime_root/source-selection"
 auto_selection_file="$runtime_root/auto-selection.json"
+ipc_target_file="$runtime_root/ipc-target.json"
 rm -f "$selection_file"
 selection_committed=0
+
+if [[ -f "$ipc_target_file" ]]; then
+  ipc_request="$(cat -- "$ipc_target_file" 2>/dev/null || true)"
+  rm -f -- "$ipc_target_file"
+  ipc_pid="$(jq -r '.pid // 0' <<<"$ipc_request" 2>/dev/null || printf '0')"
+  requested_target="$(jq -r '.target // empty' <<<"$ipc_request" 2>/dev/null || true)"
+  if [[ "$ipc_pid" =~ ^[0-9]+$ ]] && kill -0 "$ipc_pid" 2>/dev/null \
+    && [[ "$requested_target" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+    ipc_target="$requested_target"
+  fi
+fi
 
 if [[ -f "$auto_selection_file" ]]; then
   auto_selection="$(cat -- "$auto_selection_file" 2>/dev/null || true)"

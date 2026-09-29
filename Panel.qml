@@ -124,7 +124,9 @@ Panel {
     avDriftMs = 0
     expectedStop = false
     sessionState = "awaiting-portal"
-    var command = [backendCommand, "cast-live", "--address", activeAddress, "--duration", "0"]
+    var command = [backendCommand, "session-start", "--address", activeAddress,
+                   "--receiver-name", activeName, "--duration", "0",
+                   "--ipc-target", ipcTarget]
     if (Number(receiver.nativeHeight || 0) === 720) command.push("--quality", "720p")
     else if (Number(receiver.nativeHeight || 0) === 1080) command.push("--quality", "1080p")
     if (sourceMode === "workspace") {
@@ -144,7 +146,8 @@ Panel {
 
   function stopCasting() {
     if (sourcePickerVisible) sourcePickerResult = "cancel"
-    if (!castProc.running) {
+    if (stopProc.running) return
+    if (!sessionActive) {
       sessionState = "idle"
       activeAddress = ""
       activeName = ""
@@ -152,7 +155,48 @@ Panel {
     }
     expectedStop = true
     sessionState = "stopping"
-    castProc.running = false
+    stopProc.command = [backendCommand, "session-stop"]
+    stopProc.running = true
+  }
+
+  function pollSession() {
+    if (sessionStatusProc.running) return
+    sessionStatusProc.command = [backendCommand, "session-status"]
+    sessionStatusProc.running = true
+  }
+
+  function applySessionStatus(raw) {
+    var status
+    try {
+      status = JSON.parse(String(raw || "{}"))
+    } catch (error) {
+      return
+    }
+    if (Boolean(status.running)) {
+      activeAddress = String(status.address || activeAddress)
+      activeName = String(status.receiver || activeName || activeAddress)
+      activeWorkspaceName = String(status.workspace || activeWorkspaceName)
+      if (activeWorkspaceName !== "") sourceMode = "workspace"
+      videoFrames = Number(status.video_frames || 0)
+      audioBuffers = Number(status.audio_buffers || 0)
+      bitrateBps = Number(status.bitrate_bps || 0)
+      avDriftMs = Number(status.av_drift_ms || 0)
+      sessionState = String(status.state || "connecting")
+      return
+    }
+    if (expectedStop || sessionActive || String(status.state || "") === "error") {
+      if (!expectedStop && String(status.state || "") === "error") {
+        lastError = String(status.error || "The wireless display session ended unexpectedly.")
+        sessionState = "error"
+      } else {
+        lastError = ""
+        sessionState = "idle"
+      }
+      expectedStop = false
+      activeAddress = ""
+      activeName = ""
+      refreshWorkspaces()
+    }
   }
 
   function openSourcePicker(output, description, width, height, previewPath, windowsB64) {
@@ -350,7 +394,10 @@ Panel {
     })
   }
 
-  Component.onCompleted: refresh()
+  Component.onCompleted: {
+    pollSession()
+    refresh()
+  }
 
   onOpenedChanged: {
     if (!opened && sourcePickerVisible && sourcePickerResult === "pending") cancelSourcePicker()
@@ -364,6 +411,13 @@ Panel {
     repeat: true
     running: root.opened && !root.sessionActive
     onTriggered: root.refresh()
+  }
+
+  Timer {
+    interval: 1000
+    repeat: true
+    running: true
+    onTriggered: root.pollSession()
   }
 
   Process {
@@ -438,29 +492,48 @@ Panel {
 
   Process {
     id: castProc
-    stdout: SplitParser {
-      onRead: function(line) { root.handleCastLine(line) }
-    }
-    stderr: SplitParser {
-      onRead: function(line) {
-        var value = String(line || "").trim()
-        if (value !== "") root.stderrTail = value
-      }
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector {
+      id: castStderr
+      waitForEnd: true
     }
     onExited: function(exitCode, exitStatus) {
-      if (root.expectedStop) {
-        root.sessionState = "idle"
-        root.lastError = ""
-      } else if (root.sessionState !== "error") {
-        root.lastError = root.stderrTail !== ""
-          ? root.stderrTail
-          : "The wireless display process exited with status " + exitCode + "."
+      if (exitCode !== 0) {
+        root.lastError = String(castStderr.text || "").trim()
+          || "The wireless display process exited with status " + exitCode + "."
         root.sessionState = "error"
+      } else {
+        root.sessionState = "connecting"
+        root.pollSession()
       }
-      root.expectedStop = false
-      root.activeAddress = ""
-      root.activeName = ""
-      root.refreshWorkspaces()
+    }
+  }
+
+  Process {
+    id: sessionStatusProc
+    stdout: StdioCollector {
+      id: sessionStatusStdout
+      waitForEnd: true
+      onStreamFinished: root.applySessionStatus(text)
+    }
+    stderr: StdioCollector { waitForEnd: true }
+  }
+
+  Process {
+    id: stopProc
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector {
+      id: stopStderr
+      waitForEnd: true
+    }
+    onExited: function(exitCode, exitStatus) {
+      if (exitCode !== 0) {
+        root.lastError = String(stopStderr.text || "").trim()
+          || "Could not stop the wireless display session."
+        root.sessionState = "error"
+        root.expectedStop = false
+      }
+      root.pollSession()
     }
   }
 
