@@ -79,6 +79,20 @@ def process_start_ticks(pid: int) -> int | None:
         return None
 
 
+def process_ancestors(pid: int) -> set[int]:
+    ancestors: set[int] = set()
+    while pid > 1 and pid not in ancestors:
+        ancestors.add(pid)
+        try:
+            suffix = pathlib.Path(f"/proc/{pid}/stat").read_text(
+                encoding="utf-8"
+            ).rsplit(")", 1)[1]
+            pid = int(suffix.split()[1])
+        except (OSError, IndexError, ValueError):
+            break
+    return ancestors
+
+
 def session_process_is_running(state: dict[str, Any]) -> bool:
     try:
         pid = int(state["pid"])
@@ -259,6 +273,10 @@ class SilentAudioRoute:
         self.sink_name = f"omarchy_cast_{os.getpid()}"
         self.previous_sink: str | None = None
         self.module_id: int | None = None
+        self.input_workspaces: dict[str, str] = {}
+        self.last_tv_workspace = ""
+        self.cast_sink_id = ""
+        self.laptop_sink_id = ""
 
     def _save_recovery_state(self) -> None:
         path = audio_route_state_path()
@@ -338,6 +356,128 @@ class SilentAudioRoute:
                 stderr=subprocess.DEVNULL,
             )
 
+    @staticmethod
+    def _json_command(command: list[str]) -> list[dict[str, Any]]:
+        result = subprocess.run(
+            command,
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+        )
+        parsed = json.loads(result.stdout)
+        if not isinstance(parsed, list):
+            raise RuntimeError(f"{command[0]} returned an unexpected value")
+        return [item for item in parsed if isinstance(item, dict)]
+
+    def follow_workspace(self, output: str = "HovenCast-TV") -> None:
+        if not self.previous_sink or self.module_id is None:
+            return
+        monitors = self._json_command(["hyprctl", "-j", "monitors"])
+        inputs = self._json_command(["pactl", "--format=json", "list", "sink-inputs"])
+        tv_monitor = next((item for item in monitors if item.get("name") == output), None)
+        if tv_monitor is None:
+            return
+        tv_workspace = str((tv_monitor.get("activeWorkspace") or {}).get("name", ""))
+        focused_monitor = next((item for item in monitors if item.get("focused")), None)
+        focused_workspace = str(
+            ((focused_monitor or {}).get("activeWorkspace") or {}).get("name", "")
+        )
+        if not tv_workspace:
+            return
+        if not self.cast_sink_id or not self.laptop_sink_id:
+            sinks = self._json_command(["pactl", "--format=json", "list", "sinks"])
+            sink_ids = {
+                str(item.get("name", "")): str(item.get("index", "")) for item in sinks
+            }
+            self.cast_sink_id = sink_ids.get(self.sink_name, "")
+            self.laptop_sink_id = sink_ids.get(self.previous_sink, "")
+        if not self.cast_sink_id or not self.laptop_sink_id:
+            return
+        new_input_ids = {
+            str(item.get("index", ""))
+            for item in inputs
+            if str(item.get("index", "")) not in self.input_workspaces
+        }
+        client_workspaces: dict[int, set[str]] = {}
+        if new_input_ids:
+            clients = self._json_command(["hyprctl", "-j", "clients"])
+            for client in clients:
+                try:
+                    client_pid = int(client.get("pid", 0))
+                except (TypeError, ValueError):
+                    continue
+                workspace = str((client.get("workspace") or {}).get("name", ""))
+                if client_pid > 0 and workspace and not workspace.startswith("special:"):
+                    client_workspaces.setdefault(client_pid, set()).add(workspace)
+        active_input_ids: set[str] = set()
+        tv_inputs = 0
+        laptop_inputs = 0
+        for sink_input in inputs:
+            input_id = str(sink_input.get("index", ""))
+            if not input_id:
+                continue
+            active_input_ids.add(input_id)
+            if input_id not in self.input_workspaces:
+                properties = sink_input.get("properties") or {}
+                try:
+                    stream_pid = int(properties.get("application.process.id", 0))
+                except (TypeError, ValueError):
+                    stream_pid = 0
+                candidates: set[str] = set()
+                for ancestor in process_ancestors(stream_pid):
+                    candidates.update(client_workspaces.get(ancestor, set()))
+                if len(candidates) == 1:
+                    workspace = next(iter(candidates))
+                elif focused_workspace in candidates:
+                    workspace = focused_workspace
+                elif tv_workspace in candidates:
+                    workspace = tv_workspace
+                else:
+                    workspace = focused_workspace or tv_workspace
+                self.input_workspaces[input_id] = workspace
+                emit(
+                    self.event_file,
+                    "audio-stream-workspace",
+                    input_id=input_id,
+                    workspace=workspace,
+                )
+            destination = (
+                self.sink_name
+                if self.input_workspaces[input_id] == tv_workspace
+                else self.previous_sink
+            )
+            destination_id = (
+                self.cast_sink_id
+                if destination == self.sink_name
+                else self.laptop_sink_id
+            )
+            if str(sink_input.get("sink", "")) != destination_id:
+                subprocess.run(
+                    ["pactl", "move-sink-input", input_id, destination],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            if destination == self.sink_name:
+                tv_inputs += 1
+            else:
+                laptop_inputs += 1
+        self.input_workspaces = {
+            input_id: workspace
+            for input_id, workspace in self.input_workspaces.items()
+            if input_id in active_input_ids
+        }
+        if tv_workspace != self.last_tv_workspace:
+            emit(
+                self.event_file,
+                "audio-route",
+                mode="workspace-follow",
+                tv_workspace=tv_workspace,
+                tv_inputs=tv_inputs,
+                laptop_inputs=laptop_inputs,
+            )
+            self.last_tv_workspace = tv_workspace
+
     def stop(self, announce: bool = True) -> None:
         if self.module_id is None:
             return
@@ -376,6 +516,10 @@ class SilentAudioRoute:
                 restored_sink=self.previous_sink,
             )
         self.module_id = None
+        self.input_workspaces.clear()
+        self.last_tv_workspace = ""
+        self.cast_sink_id = ""
+        self.laptop_sink_id = ""
         state_path = audio_route_state_path()
         if state_path:
             state_path.unlink(missing_ok=True)
@@ -466,6 +610,7 @@ class Recorder:
         self.sender_process: subprocess.Popen[bytes] | None = None
         self.auxiliary_processes: list[subprocess.Popen[bytes]] = []
         self.audio_route = SilentAudioRoute(event_file) if mute_local_audio else None
+        self.audio_follow_failed = False
         self.mirror_output = mirror_output
         self.tone_process: subprocess.Popen[bytes] | None = None
         self.exit_code = 1
@@ -864,6 +1009,20 @@ class Recorder:
     def _metrics(self) -> bool:
         if self.stopping:
             return GLib.SOURCE_REMOVE
+        audio_route = getattr(self, "audio_route", None)
+        if audio_route and self.source_kind == "workspace":
+            try:
+                audio_route.follow_workspace()
+            except (
+                OSError,
+                ValueError,
+                RuntimeError,
+                json.JSONDecodeError,
+                subprocess.SubprocessError,
+            ) as error:
+                if not getattr(self, "audio_follow_failed", False):
+                    emit(self.event_file, "audio-workspace-follow-failed", error=str(error))
+                    self.audio_follow_failed = True
         total_bytes = self.counters.video_bytes + self.counters.audio_bytes
         bitrate = (total_bytes - self.previous_bytes) * 8
         self.previous_bytes = total_bytes

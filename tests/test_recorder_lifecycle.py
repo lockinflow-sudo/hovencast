@@ -249,6 +249,122 @@ class RecorderLifecycleTest(unittest.TestCase):
 
         stop.assert_not_called()
 
+    @mock.patch("omarchy_cast.process_ancestors", return_value={101, 100})
+    @mock.patch("omarchy_cast.subprocess.run")
+    def test_audio_stream_is_assigned_to_tv_workspace_where_it_started(
+        self, run: mock.Mock, _ancestors: mock.Mock
+    ) -> None:
+        run.side_effect = [
+            subprocess.CompletedProcess(
+                [],
+                0,
+                stdout=json.dumps(
+                    [
+                        {
+                            "name": "eDP-1",
+                            "focused": False,
+                            "activeWorkspace": {"name": "1"},
+                        },
+                        {
+                            "name": "HovenCast-TV",
+                            "focused": True,
+                            "activeWorkspace": {"name": "2"},
+                        },
+                    ]
+                ),
+            ),
+            subprocess.CompletedProcess(
+                [],
+                0,
+                stdout=json.dumps(
+                    [
+                        {
+                            "index": 7,
+                            "sink": 10,
+                            "properties": {"application.process.id": "101"},
+                        }
+                    ]
+                ),
+            ),
+            subprocess.CompletedProcess(
+                [],
+                0,
+                stdout=json.dumps(
+                    [
+                        {"index": 10, "name": "cast"},
+                        {"index": 20, "name": "speakers"},
+                    ]
+                ),
+            ),
+            subprocess.CompletedProcess(
+                [],
+                0,
+                stdout=json.dumps([{"pid": 100, "workspace": {"name": "2"}}]),
+            ),
+        ]
+        route = SilentAudioRoute(io.StringIO())
+        route.sink_name = "cast"
+        route.previous_sink = "speakers"
+        route.module_id = 1
+
+        route.follow_workspace()
+
+        self.assertEqual(route.input_workspaces, {"7": "2"})
+        self.assertEqual(len(run.call_args_list), 4)
+
+    @mock.patch("omarchy_cast.subprocess.run")
+    def test_audio_returns_to_laptop_when_its_workspace_leaves_tv(
+        self, run: mock.Mock
+    ) -> None:
+        run.side_effect = [
+            subprocess.CompletedProcess(
+                [],
+                0,
+                stdout=json.dumps(
+                    [
+                        {
+                            "name": "eDP-1",
+                            "focused": True,
+                            "activeWorkspace": {"name": "2"},
+                        },
+                        {
+                            "name": "HovenCast-TV",
+                            "focused": False,
+                            "activeWorkspace": {"name": "1"},
+                        },
+                    ]
+                ),
+            ),
+            subprocess.CompletedProcess(
+                [],
+                0,
+                stdout=json.dumps([{"index": 7, "sink": 10, "properties": {}}]),
+            ),
+            subprocess.CompletedProcess(
+                [],
+                0,
+                stdout=json.dumps(
+                    [
+                        {"index": 10, "name": "cast"},
+                        {"index": 20, "name": "speakers"},
+                    ]
+                ),
+            ),
+            subprocess.CompletedProcess([], 0),
+        ]
+        route = SilentAudioRoute(io.StringIO())
+        route.sink_name = "cast"
+        route.previous_sink = "speakers"
+        route.module_id = 1
+        route.input_workspaces = {"7": "2"}
+
+        route.follow_workspace()
+
+        self.assertEqual(
+            run.call_args_list[-1].args[0],
+            ["pactl", "move-sink-input", "7", "speakers"],
+        )
+
     def test_stop_closes_fifo_consumers_before_pipeline(self) -> None:
         calls: list[str] = []
         recorder = Recorder.__new__(Recorder)
