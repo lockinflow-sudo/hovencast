@@ -414,20 +414,14 @@ static void omarchy_wfd_server_class_init(OmarchyWfdServerClass *klass) {
 
 static void omarchy_wfd_server_init(OmarchyWfdServer *self) { (void)self; }
 
-static gboolean send_source_ready(const char *receiver, const char *name,
-                                  const char *source_id,
-                                  GSocketConnection **out_connection,
-                                  GError **error) {
+static gboolean write_mice_message(GSocketConnection *connection, guint8 command,
+                                   const char *name, const char *source_id,
+                                   gboolean include_rtsp_port, GError **error) {
   if (strlen(source_id) != 16) {
     g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
                 "MICE source ID must be exactly 16 bytes");
     return FALSE;
   }
-  g_autoptr(GSocketClient) client = g_socket_client_new();
-  g_autoptr(GSocketConnection) connection =
-      g_socket_client_connect_to_host(client, receiver, 7250, NULL, error);
-  if (!connection)
-    return FALSE;
   g_autofree gunichar2 *utf16 = NULL;
   g_autofree char *with_bom = g_strconcat("\xEF\xBB\xBF", name, NULL);
   glong units = 0;
@@ -435,24 +429,56 @@ static gboolean send_source_ready(const char *receiver, const char *name,
   if (!utf16)
     return FALSE;
   gsize name_bytes = (gsize)units * 2;
-  const guint8 footer_prefix[] = {2, 0, 2, 0x1c, 0x44, 3, 0, 16};
-  gsize total = 7 + name_bytes + sizeof(footer_prefix) + 16;
+  gsize total = 7 + name_bytes + (include_rtsp_port ? 5 : 0) + 3 + 16;
+  if (total > G_MAXUINT16) {
+    g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+                "MICE message is too large");
+    return FALSE;
+  }
   g_autofree guint8 *message = g_malloc0(total);
   message[0] = total >> 8;
   message[1] = total & 0xff;
   message[2] = 1;
-  message[3] = 1;
+  message[3] = command;
   message[4] = 0;
   message[5] = name_bytes >> 8;
   message[6] = name_bytes & 0xff;
   memcpy(message + 7, utf16, name_bytes);
-  memcpy(message + 7 + name_bytes, footer_prefix, sizeof(footer_prefix));
-  memcpy(message + 7 + name_bytes + sizeof(footer_prefix), source_id, 16);
+  gsize offset = 7 + name_bytes;
+  if (include_rtsp_port) {
+    const guint8 rtsp_port[] = {2, 0, 2, 0x1c, 0x44};
+    memcpy(message + offset, rtsp_port, sizeof(rtsp_port));
+    offset += sizeof(rtsp_port);
+  }
+  const guint8 source_id_header[] = {3, 0, 16};
+  memcpy(message + offset, source_id_header, sizeof(source_id_header));
+  offset += sizeof(source_id_header);
+  memcpy(message + offset, source_id, 16);
   GOutputStream *output = g_io_stream_get_output_stream(G_IO_STREAM(connection));
   if (!g_output_stream_write_all(output, message, total, NULL, NULL, error))
     return FALSE;
+  return g_output_stream_flush(output, NULL, error);
+}
+
+static gboolean send_source_ready(const char *receiver, const char *name,
+                                  const char *source_id,
+                                  GSocketConnection **out_connection,
+                                  GError **error) {
+  g_autoptr(GSocketClient) client = g_socket_client_new();
+  g_autoptr(GSocketConnection) connection =
+      g_socket_client_connect_to_host(client, receiver, 7250, NULL, error);
+  if (!connection)
+    return FALSE;
+  if (!write_mice_message(connection, 0x01, name, source_id, TRUE, error))
+    return FALSE;
   *out_connection = g_steal_pointer(&connection);
   return TRUE;
+}
+
+static gboolean send_stop_projection(GSocketConnection *connection,
+                                     const char *name, const char *source_id,
+                                     GError **error) {
+  return write_mice_message(connection, 0x02, name, source_id, FALSE, error);
 }
 
 static char *route_address_for_receiver(const char *receiver, GError **error) {
@@ -578,6 +604,13 @@ int main(int argc, char **argv) {
   if (timeout > 0)
     g_timeout_add_seconds(timeout, stop_loop, NULL);
   g_main_loop_run(main_loop);
+  g_autoptr(GError) stop_error = NULL;
+  if (send_stop_projection(mice_connection, friendly_name, source_id, &stop_error)) {
+    event("mice-stop-projection", "sent");
+  } else {
+    event("mice-stop-projection", stop_error ? stop_error->message : "send-failed");
+  }
+  g_io_stream_close(G_IO_STREAM(mice_connection), NULL, NULL);
   g_main_loop_unref(main_loop);
   main_loop = NULL;
   g_clear_object(&expected_receiver_address);
