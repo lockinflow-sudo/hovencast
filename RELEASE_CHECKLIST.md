@@ -45,3 +45,14 @@
 - [x] Test flooded output, timeout with valid partial output, malformed records, and receiver cap.
 - [x] Confirm live Roku discovery still finds the available TVs.
 - [ ] Get marketplace reviewer confirmation before tagging the next release.
+
+## v0.2.0 virtual workspace casting
+
+- [x] Prove PipeWire can continuously capture a 1280 × 720 Hyprland headless output.
+- [x] Keep the portal node and encoder alive while changing the workspace on the output.
+- [x] Move the laptop to a fallback before casting its visible workspace.
+- [x] Restore workspace placement and focus after normal stop.
+- [x] Recover the output and workspace placement after a forced backend crash.
+- [x] Add window-versus-workspace selection and live workspace controls.
+- [ ] Validate the complete transport with the TCL Roku 32S331 at 192.168.1.240.
+- [ ] Install or publish the updated plugin only after explicit owner approval.

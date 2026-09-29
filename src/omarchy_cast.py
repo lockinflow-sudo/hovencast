@@ -30,6 +30,7 @@ from omarchy_cast_protocol import (
     enrich_receiver_details,
     probe_wfd_capabilities,
 )
+from virtual_workspace import VirtualWorkspace, guard
 
 APP_ROOT = pathlib.Path(__file__).resolve().parents[1]
 APP_VERSION = json.loads(
@@ -105,7 +106,9 @@ def picker_source_info() -> dict[str, Any]:
     if not isinstance(parsed, dict):
         return {"kind": "unknown"}
     kind = str(parsed.get("kind", "unknown"))
-    parsed["kind"] = kind if kind in {"screen", "window", "region"} else "unknown"
+    parsed["kind"] = (
+        kind if kind in {"screen", "window", "region", "workspace"} else "unknown"
+    )
     return parsed
 
 
@@ -1207,79 +1210,192 @@ def run_cast_live(args: argparse.Namespace) -> int:
     assert session_root is not None
     event_path = session_root / "session.events.jsonl"
     video_mode = choose_video_mode(args.address, args.quality)
-    Gst.init(None)
-    with tempfile.TemporaryDirectory(prefix="live-", dir=session_root) as runtime_dir:
-        raw_transport_fifo = pathlib.Path(runtime_dir) / "raw-transport.ts"
-        transport_fifo = pathlib.Path(runtime_dir) / "transport.ts"
-        os.mkfifo(raw_transport_fifo, 0o600)
-        os.mkfifo(transport_fifo, 0o600)
-
-        def start_sender() -> tuple[subprocess.Popen[bytes], list[subprocess.Popen[bytes]]]:
-            environment = dict(os.environ)
-            environment["OMARCHY_CAST_FRIENDLY_NAME"] = args.name
-            environment["OMARCHY_CAST_SOURCE_ID"] = args.source_id
-            environment["OMARCHY_CAST_CEA_MODE"] = video_mode.cea_bitmap
-            sender_timeout = args.duration + 30 if args.duration > 0 else 0
-            sender = subprocess.Popen(
-                [str(helper), args.address, str(transport_fifo), str(sender_timeout)],
-                env=environment,
-            )
-            remux = subprocess.Popen(
+    virtual_workspace: VirtualWorkspace | None = None
+    guard_process: subprocess.Popen[bytes] | None = None
+    if args.workspace:
+        virtual_workspace = VirtualWorkspace()
+        state = virtual_workspace.start(video_mode.width, video_mode.height, args.workspace)
+        try:
+            virtual_workspace.arm_auto_picker(args.workspace)
+            guard_process = subprocess.Popen(
                 [
-                    "ffmpeg",
-                    "-nostdin",
-                    "-hide_banner",
-                    "-loglevel",
-                    "fatal",
-                    "-y",
-                    "-i",
-                    str(raw_transport_fifo),
-                    "-map",
-                    "0:v:0",
-                    "-map",
-                    "0:a:0",
-                    "-c",
-                    "copy",
-                    "-mpegts_start_pid",
-                    "256",
-                    "-mpegts_pmt_start_pid",
-                    "4096",
-                    "-muxdelay",
-                    "0.7",
-                    "-muxpreload",
-                    "0.7",
-                    "-f",
-                    "mpegts",
-                    str(transport_fifo),
+                    sys.executable,
+                    str(pathlib.Path(__file__).resolve()),
+                    "workspace-guard",
+                    "--pid",
+                    str(os.getpid()),
                 ],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
             )
-            return sender, [remux]
+        except Exception:
+            virtual_workspace.stop()
+            raise
+        print(
+            json.dumps(
+                {
+                    "time": time.time(),
+                    "event": "virtual-workspace-started",
+                    "output": state["output"],
+                    "workspace": state["selected_workspace"],
+                    "width": state["width"],
+                    "height": state["height"],
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+    try:
+        Gst.init(None)
+        with tempfile.TemporaryDirectory(prefix="live-", dir=session_root) as runtime_dir:
+            raw_transport_fifo = pathlib.Path(runtime_dir) / "raw-transport.ts"
+            transport_fifo = pathlib.Path(runtime_dir) / "transport.ts"
+            os.mkfifo(raw_transport_fifo, 0o600)
+            os.mkfifo(transport_fifo, 0o600)
 
-        with event_path.open("w", encoding="utf-8") as event_file:
-            emit(
-                event_file,
-                "live-cast-requested",
-                receiver=args.address,
-                duration_seconds=args.duration,
-                video_profile="high",
-                video_mode=video_mode.name,
-                video_width=video_mode.width,
-                video_height=video_mode.height,
-                video_bitrate_kbps=video_mode.bitrate_kbps,
-                encoder_preset=video_mode.encoder_preset,
-                wfd_cea_bitmap=video_mode.cea_bitmap,
-            )
-            recorder = Recorder(
-                raw_transport_fifo,
-                args.duration,
-                event_file,
-                False,
-                video_profile="high",
-                video_mode=video_mode,
-                sender_start=start_sender,
-                mute_local_audio=not args.keep_local_audio,
-            )
-            return recorder.start()
+            def start_sender() -> tuple[
+                subprocess.Popen[bytes], list[subprocess.Popen[bytes]]
+            ]:
+                environment = dict(os.environ)
+                environment["OMARCHY_CAST_FRIENDLY_NAME"] = args.name
+                environment["OMARCHY_CAST_SOURCE_ID"] = args.source_id
+                environment["OMARCHY_CAST_CEA_MODE"] = video_mode.cea_bitmap
+                sender_timeout = args.duration + 30 if args.duration > 0 else 0
+                sender = subprocess.Popen(
+                    [str(helper), args.address, str(transport_fifo), str(sender_timeout)],
+                    env=environment,
+                )
+                remux = subprocess.Popen(
+                    [
+                        "ffmpeg",
+                        "-nostdin",
+                        "-hide_banner",
+                        "-loglevel",
+                        "fatal",
+                        "-y",
+                        "-i",
+                        str(raw_transport_fifo),
+                        "-map",
+                        "0:v:0",
+                        "-map",
+                        "0:a:0",
+                        "-c",
+                        "copy",
+                        "-mpegts_start_pid",
+                        "256",
+                        "-mpegts_pmt_start_pid",
+                        "4096",
+                        "-muxdelay",
+                        "0.7",
+                        "-muxpreload",
+                        "0.7",
+                        "-f",
+                        "mpegts",
+                        str(transport_fifo),
+                    ],
+                )
+                return sender, [remux]
+
+            with event_path.open("w", encoding="utf-8") as event_file:
+                emit(
+                    event_file,
+                    "live-cast-requested",
+                    receiver=args.address,
+                    duration_seconds=args.duration,
+                    video_profile="high",
+                    video_mode=video_mode.name,
+                    video_width=video_mode.width,
+                    video_height=video_mode.height,
+                    video_bitrate_kbps=video_mode.bitrate_kbps,
+                    encoder_preset=video_mode.encoder_preset,
+                    wfd_cea_bitmap=video_mode.cea_bitmap,
+                )
+                recorder = Recorder(
+                    raw_transport_fifo,
+                    args.duration,
+                    event_file,
+                    False,
+                    video_profile="high",
+                    video_mode=video_mode,
+                    sender_start=start_sender,
+                    mute_local_audio=not args.keep_local_audio,
+                )
+                return recorder.start()
+    finally:
+        if virtual_workspace:
+            virtual_workspace.stop()
+        if guard_process and guard_process.poll() is None:
+            guard_process.terminate()
+
+
+def run_workspace_list(_args: argparse.Namespace) -> int:
+    manager = VirtualWorkspace()
+    manager.recover_stale()
+    workspaces = []
+    virtual_state: dict[str, Any] = {}
+    try:
+        virtual_state = manager.status()
+    except RuntimeError:
+        pass
+    selected = str(virtual_state.get("selected_workspace", ""))
+    monitors = manager.monitors()
+    for item in manager.workspaces():
+        name = str(item.get("name", ""))
+        if not name or name.startswith("special:"):
+            continue
+        workspaces.append(
+            {
+                "name": name,
+                "monitor": str(item.get("monitor", "")),
+                "windows": int(item.get("windows", 0)),
+                "active": bool(
+                    item.get("monitor") != manager.output
+                    and any(
+                        monitor.get("name") == item.get("monitor")
+                        and str(
+                            (monitor.get("activeWorkspace") or {}).get("name", "")
+                        )
+                        == name
+                        for monitor in monitors
+                    )
+                ),
+                "casting": name == selected,
+            }
+        )
+    workspaces.sort(
+        key=lambda item: (
+            not item["name"].isdigit(),
+            int(item["name"]) if item["name"].isdigit() else item["name"],
+        )
+    )
+    print(json.dumps({"workspaces": workspaces}, sort_keys=True))
+    return 0
+
+
+def run_workspace_control(args: argparse.Namespace) -> int:
+    manager = VirtualWorkspace()
+    if args.action == "set":
+        state = manager.switch(args.workspace)
+    elif args.action == "focus-tv":
+        state = manager.focus_tv()
+    elif args.action == "focus-local":
+        state = manager.focus_local_display()
+    elif args.action == "status":
+        state = manager.status()
+    elif args.action == "cleanup":
+        manager.recover_stale()
+        manager.stop()
+        state = {"running": False}
+    else:
+        raise RuntimeError(f"unsupported workspace action: {args.action}")
+    print(json.dumps(state, sort_keys=True))
+    return 0
+
+
+def run_workspace_guard(args: argparse.Namespace) -> int:
+    return guard(args.pid)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1301,11 +1417,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="video mode; auto uses Roku native panel information when available",
     )
     cast_live.add_argument(
+        "--workspace",
+        help="capture this workspace on a dedicated virtual output",
+    )
+    cast_live.add_argument(
         "--keep-local-audio",
         action="store_true",
         help="also play desktop audio on the computer while casting",
     )
     cast_live.set_defaults(func=run_cast_live)
+    workspace_list = subparsers.add_parser(
+        "workspace-list", help="list Hyprland workspaces"
+    )
+    workspace_list.set_defaults(func=run_workspace_list)
+    workspace = subparsers.add_parser(
+        "workspace", help="control the active virtual workspace cast"
+    )
+    workspace.add_argument(
+        "action", choices=("set", "focus-tv", "focus-local", "status", "cleanup")
+    )
+    workspace.add_argument("workspace", nargs="?")
+    workspace.set_defaults(func=run_workspace_control)
+    workspace_guard = subparsers.add_parser("workspace-guard", help=argparse.SUPPRESS)
+    workspace_guard.add_argument("--pid", type=int, required=True)
+    workspace_guard.set_defaults(func=run_workspace_guard)
     return parser
 
 

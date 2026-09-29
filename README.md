@@ -1,13 +1,14 @@
 # HovenCast
 
-HovenCast is an Omarchy bar plugin for sharing a screen, window, or selected area,
-with desktop audio, to a compatible Roku TV on the same local network.
+HovenCast is an Omarchy bar plugin that turns a compatible Roku TV into a
+wireless Hyprland workspace. It can also share one application window, with
+desktop audio, over the same local network.
 
 Previously published as OmaCast. The installed plugin ID (`hoven.cast`),
 command names, and runtime paths remain unchanged so existing installations
 can update without reinstalling.
 
-Version 0.1.1 uses Miracast over Infrastructure (MICE). It has been physically
+Version 0.2.0 uses Miracast over Infrastructure (MICE). It has been physically
 tested with TCL Roku models 32S331, 55S405, and 65S451. Other Roku TVs that
 advertise MICE and provide valid Roku device information are shown as
 compatible candidates, but still need community testing. Fire TV, Wi-Fi
@@ -43,20 +44,44 @@ Setup changes only `custom_picker_binary`; it preserves your existing
 ## Use
 
 1. Click the cast icon in the Omarchy bar.
-2. Choose a discovered Roku TV.
-3. Approve the sender on the TV if prompted.
-4. Choose a screen, window, or area in the HovenCast picker.
+2. Choose **Virtual workspace** and the Hyprland workspace to show, or choose
+   **Application window**.
+3. Choose a discovered Roku TV and approve the sender on the TV if prompted.
+4. While workspace casting, choose another workspace at any time. The Roku
+   connection and encoder keep running against the same virtual display.
 5. Right-click the bar icon to stop.
+
+The virtual TV output uses the receiver's supported video mode (1280 × 720 for
+the TCL Roku 32S331) at scale 1, so applications receive a genuine TV-sized
+fullscreen layout without changing the laptop display. A workspace is visible
+on only one output. If the laptop's visible workspace is sent to the TV,
+HovenCast first switches the laptop to another workspace.
+
+Use the widget's **Control TV** and **Return to laptop** actions for mouse and
+keyboard focus. Omarchy's existing **Ctrl+Alt+Tab** and
+**Ctrl+Alt+Shift+Tab** monitor-focus shortcuts also move between the laptop and
+TV, including when the widget is no longer focused.
 
 Audio moves to the TV while casting by default and is restored afterward.
 Enable **Keep audio on this computer** in the widget settings to play it
-locally too. If HovenCast or the computer is interrupted before cleanup, the next
-HovenCast command recovers audio routing left by the interrupted session.
+locally too. HovenCast restores the previous audio sink and workspace layout on
+normal stop. A detached guard restores the workspaces and removes the headless
+output if the casting backend crashes; the next HovenCast command also recovers
+stale state.
 
 Window sharing captures the selected monitor and crops it to the chosen window,
 following that window as its geometry changes. Keep private windows off that
 monitor while sharing. The portal picker is system-wide while HovenCast is
 installed, so it also appears for screen-sharing requests from other apps.
+
+The workspace controller is also available from a terminal:
+
+```sh
+omarchy-cast workspace-list
+omarchy-cast workspace set 4
+omarchy-cast workspace focus-tv
+omarchy-cast workspace focus-local
+```
 
 ## Remove
 
@@ -99,12 +124,17 @@ screen capture before attaching diagnostics.
 ## Known limitations
 
 - TCL Roku models 32S331, 55S405, and 65S451 are the only physically tested
-  receivers in 0.1.1. Other discovered Roku models may or may not work.
+  receivers. Other discovered Roku models may or may not work.
 - Discovery depends on Roku MICE advertisement and local multicast traffic.
 - 720p and 1080p Roku modes are selected automatically; other resolutions are
   not supported.
 - Receiver reconnect, network-roaming, suspend/resume, and long-duration
   reliability need broader field testing.
+- Audio routing is session-wide, not per workspace. With local audio disabled,
+  existing desktop streams move to the cast sink until the session stops.
+- A compositor crash removes the headless output itself; HovenCast restores any
+  remaining saved state on the next command, but applications may decide to
+  resize or reposition their own windows after an output disappears.
 - The custom picker changes the portal picker for all applications until
   HovenCast is uninstalled.
 

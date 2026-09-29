@@ -95,6 +95,55 @@ class FakeLoop:
 
 
 class RecorderLifecycleTest(unittest.TestCase):
+    def test_picker_automatically_selects_owned_virtual_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            runtime = root / "runtime"
+            picker_root = runtime / "omacast-picker"
+            fake_bin = root / "bin"
+            picker_root.mkdir(parents=True)
+            fake_bin.mkdir()
+            hyprctl = fake_bin / "hyprctl"
+            hyprctl.write_text(
+                "#!/bin/bash\n"
+                "printf '%s\\n' '[{\"name\":\"eDP-1\"},"
+                "{\"name\":\"HovenCast-TV\"}]'\n",
+                encoding="utf-8",
+            )
+            hyprctl.chmod(0o755)
+            request = {
+                "pid": os.getpid(),
+                "output": "HovenCast-TV",
+                "metadata": {
+                    "kind": "workspace",
+                    "workspace": "4",
+                    "output": "HovenCast-TV",
+                },
+            }
+            (picker_root / "auto-selection.json").write_text(
+                json.dumps(request), encoding="utf-8"
+            )
+            environment = {
+                "PATH": f"{fake_bin}:/usr/bin",
+                "XDG_RUNTIME_DIR": str(runtime),
+            }
+
+            result = subprocess.run(
+                [str(PICKER)],
+                env=environment,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+
+            self.assertEqual(result.stdout.strip(), "[SELECTION]/screen:HovenCast-TV")
+            self.assertFalse((picker_root / "auto-selection.json").exists())
+            with mock.patch.dict(os.environ, environment, clear=True):
+                metadata = picker_source_info()
+            self.assertEqual(metadata["kind"], "workspace")
+            self.assertEqual(metadata["workspace"], "4")
+
     def test_picker_metadata_survives_exit_until_backend_consumes_it(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)

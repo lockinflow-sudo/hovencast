@@ -42,6 +42,11 @@ Panel {
   property string sourceSelectedWindowHandle: ""
   property int sourceCursor: 3
   property int sourceWindowIndex: 0
+  property string sourceMode: "workspace"
+  property var availableWorkspaces: []
+  property int selectedWorkspaceIndex: 0
+  property string activeWorkspaceName: ""
+  property string workspaceError: ""
 
   readonly property string backendCommand: Model.localPath(Qt.resolvedUrl("omarchy-cast"))
   readonly property string version: Model.version()
@@ -72,6 +77,39 @@ Panel {
     sessionState = "discovering"
     discoverProc.command = [backendCommand, "discover"]
     discoverProc.running = true
+    refreshWorkspaces()
+  }
+
+  function refreshWorkspaces() {
+    if (workspaceListProc.running) return
+    workspaceListProc.command = [backendCommand, "workspace-list"]
+    workspaceListProc.running = true
+  }
+
+  function selectedWorkspaceName() {
+    if (selectedWorkspaceIndex < 0 || selectedWorkspaceIndex >= availableWorkspaces.length)
+      return ""
+    return String(availableWorkspaces[selectedWorkspaceIndex].name || "")
+  }
+
+  function chooseWorkspace(index) {
+    if (index < 0 || index >= availableWorkspaces.length) return
+    selectedWorkspaceIndex = index
+    if (sessionState === "streaming" && sourceMode === "workspace") {
+      activeWorkspaceName = String(availableWorkspaces[index].name || "")
+      workspaceActionProc.command = [backendCommand, "workspace", "set", activeWorkspaceName]
+      workspaceActionProc.running = true
+    }
+  }
+
+  function focusTvWorkspace() {
+    workspaceActionProc.command = [backendCommand, "workspace", "focus-tv"]
+    workspaceActionProc.running = true
+  }
+
+  function focusLaptop() {
+    workspaceActionProc.command = [backendCommand, "workspace", "focus-local"]
+    workspaceActionProc.running = true
   }
 
   function connectReceiver(receiver) {
@@ -87,6 +125,18 @@ Panel {
     expectedStop = false
     sessionState = "awaiting-portal"
     var command = [backendCommand, "cast-live", "--address", activeAddress, "--duration", "0"]
+    if (Number(receiver.nativeHeight || 0) === 720) command.push("--quality", "720p")
+    else if (Number(receiver.nativeHeight || 0) === 1080) command.push("--quality", "1080p")
+    if (sourceMode === "workspace") {
+      var workspace = selectedWorkspaceName()
+      if (workspace === "") {
+        lastError = "Choose a workspace before connecting."
+        sessionState = "error"
+        return
+      }
+      activeWorkspaceName = workspace
+      command.push("--workspace", workspace)
+    }
     if (keepLocalAudio) command.push("--keep-local-audio")
     castProc.command = command
     castProc.running = true
@@ -113,8 +163,8 @@ Panel {
     sourcePreviewPath = String(previewPath || "")
     sourcePreviewNonce += 1
     sourceWindows = Model.parsePickerWindowList(Util.decodeBase64(String(windowsB64 || "")))
-    sourcePickerPage = "ready"
-    sourceSelection = "screen"
+    sourcePickerPage = sourceMode === "window" ? "windows" : "ready"
+    sourceSelection = sourceMode === "window" ? "window" : "screen"
     sourceSelectedWindowHandle = ""
     sourceCursor = 3
     sourceWindowIndex = 0
@@ -222,6 +272,11 @@ Panel {
       case "portal-requested":
         sessionState = "awaiting-portal"
         break
+      case "virtual-workspace-started":
+        sourceMode = "workspace"
+        activeWorkspaceName = String(event.workspace || "")
+        sessionState = "connecting"
+        break
       case "portal-started":
       case "sender-started":
       case "pipeline-started":
@@ -301,6 +356,7 @@ Panel {
     if (!opened && sourcePickerVisible && sourcePickerResult === "pending") cancelSourcePicker()
     if (opened && !sessionActive) refresh()
     if (opened) cursorActive = false
+    if (opened) refreshWorkspaces()
   }
 
   Timer {
@@ -338,6 +394,49 @@ Panel {
   }
 
   Process {
+    id: workspaceListProc
+    stdout: StdioCollector {
+      id: workspaceListStdout
+      waitForEnd: true
+      onStreamFinished: {
+        var result = Model.parseWorkspaces(text)
+        root.availableWorkspaces = result.workspaces
+        root.workspaceError = result.error
+        var activeIndex = 0
+        for (var i = 0; i < result.workspaces.length; i++) {
+          if (result.workspaces[i].casting
+              || (!root.sessionActive && result.workspaces[i].active)) activeIndex = i
+        }
+        root.selectedWorkspaceIndex = Math.max(0, Math.min(activeIndex, result.workspaces.length - 1))
+      }
+    }
+    stderr: StdioCollector {
+      id: workspaceListStderr
+      waitForEnd: true
+    }
+    onExited: function(exitCode, exitStatus) {
+      if (exitCode !== 0)
+        root.workspaceError = String(workspaceListStderr.text || "").trim()
+          || "Could not list Hyprland workspaces."
+    }
+  }
+
+  Process {
+    id: workspaceActionProc
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector {
+      id: workspaceActionStderr
+      waitForEnd: true
+    }
+    onExited: function(exitCode, exitStatus) {
+      if (exitCode !== 0)
+        root.workspaceError = String(workspaceActionStderr.text || "").trim()
+          || "Could not control the TV workspace."
+      root.refreshWorkspaces()
+    }
+  }
+
+  Process {
     id: castProc
     stdout: SplitParser {
       onRead: function(line) { root.handleCastLine(line) }
@@ -361,6 +460,7 @@ Panel {
       root.expectedStop = false
       root.activeAddress = ""
       root.activeName = ""
+      root.refreshWorkspaces()
     }
   }
 
@@ -540,6 +640,10 @@ Panel {
       onTextKey: function(text) {
         if (text === "r" || text === "R") root.refresh()
         else if ((text === "s" || text === "S") && root.sessionActive) root.stopCasting()
+        else if ((text === "t" || text === "T") && root.sessionState === "streaming"
+                 && root.sourceMode === "workspace") root.focusTvWorkspace()
+        else if ((text === "l" || text === "L") && root.sessionState === "streaming"
+                 && root.sourceMode === "workspace") root.focusLaptop()
       }
 
       Flickable {
@@ -983,6 +1087,187 @@ Panel {
               foreground: root.foreground
               onToggled: root.persistAudioPreference(!root.keepLocalAudio)
             }
+          }
+
+          PanelSeparator {
+            foreground: root.foreground
+          }
+
+          PanelSectionHeader {
+            width: parent.width
+            text: "CAST SOURCE"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+
+          RowLayout {
+            width: parent.width
+            spacing: Style.space(8)
+
+            CursorSurface {
+              Layout.fillWidth: true
+              implicitHeight: Style.space(44)
+              current: root.sourceMode === "workspace"
+              bordered: true
+              foreground: root.foreground
+              accent: root.urgent
+              borderSpec: current ? Border.flat(root.urgent, 2)
+                : Border.controlSpec("normal", foreground, accent)
+              Text {
+                anchors.centerIn: parent
+                text: "Virtual workspace"
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.bold: root.sourceMode === "workspace"
+              }
+              TapHandler {
+                enabled: !root.sessionActive
+                onTapped: root.sourceMode = "workspace"
+              }
+            }
+
+            CursorSurface {
+              Layout.fillWidth: true
+              implicitHeight: Style.space(44)
+              current: root.sourceMode === "window"
+              bordered: true
+              foreground: root.foreground
+              accent: root.urgent
+              borderSpec: current ? Border.flat(root.urgent, 2)
+                : Border.controlSpec("normal", foreground, accent)
+              Text {
+                anchors.centerIn: parent
+                text: "Application window"
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.bold: root.sourceMode === "window"
+              }
+              TapHandler {
+                enabled: !root.sessionActive
+                onTapped: root.sourceMode = "window"
+              }
+            }
+          }
+
+          Text {
+            visible: root.sourceMode === "workspace"
+            width: parent.width
+            text: root.sessionState === "streaming"
+              ? "Choose another workspace without reconnecting the TV."
+              : "The selected workspace gets a dedicated 1280 × 720 TV display."
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+
+          Flow {
+            visible: root.sourceMode === "workspace"
+            width: parent.width
+            spacing: Style.space(7)
+
+            Repeater {
+              model: root.availableWorkspaces
+
+              CursorSurface {
+                id: workspaceChoice
+                required property var modelData
+                required property int index
+                width: Math.max(Style.space(58), workspaceLabel.implicitWidth + Style.space(22))
+                implicitHeight: Style.space(38)
+                current: root.selectedWorkspaceIndex === index
+                bordered: true
+                foreground: root.foreground
+                accent: root.urgent
+                borderSpec: current ? Border.flat(root.urgent, 2)
+                  : Border.controlSpec("normal", foreground, accent)
+
+                Text {
+                  id: workspaceLabel
+                  anchors.centerIn: parent
+                  text: String(workspaceChoice.modelData.name)
+                    + (Number(workspaceChoice.modelData.windows || 0) > 0
+                      ? " · " + Number(workspaceChoice.modelData.windows) : "")
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  font.bold: workspaceChoice.current
+                }
+
+                TapHandler {
+                  enabled: !workspaceActionProc.running
+                  onTapped: root.chooseWorkspace(workspaceChoice.index)
+                }
+              }
+            }
+          }
+
+          Text {
+            visible: root.sourceMode === "workspace" && root.availableWorkspaces.length === 0
+            width: parent.width
+            text: root.workspaceError !== "" ? root.workspaceError : "No normal Hyprland workspaces are available."
+            color: root.workspaceError !== "" ? root.urgent : root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+
+          RowLayout {
+            visible: root.sourceMode === "workspace" && root.sessionState === "streaming"
+            width: parent.width
+            spacing: Style.space(8)
+
+            CursorSurface {
+              Layout.fillWidth: true
+              implicitHeight: Style.space(40)
+              bordered: true
+              foreground: root.foreground
+              Text {
+                anchors.centerIn: parent
+                text: "Control TV"
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+              }
+              TapHandler { onTapped: root.focusTvWorkspace() }
+            }
+
+            CursorSurface {
+              Layout.fillWidth: true
+              implicitHeight: Style.space(40)
+              bordered: true
+              foreground: root.foreground
+              Text {
+                anchors.centerIn: parent
+                text: "Return to laptop"
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+              }
+              TapHandler { onTapped: root.focusLaptop() }
+            }
+          }
+
+          Text {
+            visible: root.sourceMode === "workspace" && root.sessionState === "streaming"
+            width: parent.width
+            text: "Keyboard: Ctrl+Alt+Tab moves to the TV; Ctrl+Alt+Shift+Tab returns."
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+
+          Text {
+            visible: root.workspaceError !== "" && root.availableWorkspaces.length > 0
+            width: parent.width
+            text: root.workspaceError
+            color: root.urgent
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
           }
 
           PanelSeparator {

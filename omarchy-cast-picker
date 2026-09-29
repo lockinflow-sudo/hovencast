@@ -19,8 +19,27 @@ runtime_root="$XDG_RUNTIME_DIR/omacast-picker"
 mkdir -p -m 700 "$runtime_root"
 chmod 700 "$runtime_root"
 selection_file="$runtime_root/source-selection"
+auto_selection_file="$runtime_root/auto-selection.json"
 rm -f "$selection_file"
 selection_committed=0
+
+if [[ -f "$auto_selection_file" ]]; then
+  auto_selection="$(cat -- "$auto_selection_file" 2>/dev/null || true)"
+  rm -f -- "$auto_selection_file"
+  auto_pid="$(jq -r '.pid // 0' <<<"$auto_selection" 2>/dev/null || printf '0')"
+  auto_output="$(jq -r '.output // empty' <<<"$auto_selection" 2>/dev/null || true)"
+  auto_metadata="$(jq -c '.metadata // {}' <<<"$auto_selection" 2>/dev/null || true)"
+  if [[ "$auto_pid" =~ ^[0-9]+$ ]] && kill -0 "$auto_pid" 2>/dev/null \
+    && [[ -n "$auto_output" ]] \
+    && hyprctl -j monitors all 2>/dev/null | jq -e --arg output "$auto_output" \
+      '.[] | select(.name == $output)' >/dev/null; then
+    printf '%s\n' "$auto_metadata" >"$selection_file.tmp"
+    mv -f "$selection_file.tmp" "$selection_file"
+    selection_committed=1
+    printf '[SELECTION]%s/screen:%s\n' "$allow_token" "$auto_output"
+    exit 0
+  fi
+fi
 
 monitor_json="$(hyprctl -j monitors 2>/dev/null | jq -c '([.[] | select(.focused)] + .)[0] // {}' 2>/dev/null)"
 output="$(jq -r '.name // empty' <<<"$monitor_json")"

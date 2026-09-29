@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "hoven.cast",
   "name": "HovenCast",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "author": "Sean Hovenkamp",
   "license": "MIT",
-  "description": "Share an Omarchy screen, window, or area with audio to compatible Roku TVs.",
+  "description": "Cast a dedicated Hyprland workspace or application window with audio to compatible Roku TVs.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "HovenCast",
-    "description": "Share an Omarchy screen and audio with a supported Roku TV.",
+    "description": "Use a Roku TV as a wireless Hyprland workspace.",
     "category": "Network",
     "allowMultiple": false,
     "defaultSection": "right",

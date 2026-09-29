@@ -21,6 +21,15 @@ assert.equal(model.parseDiscovery("not json").receivers.length, 0)
 assert.match(model.parseDiscovery("not json").error, /unreadable/)
 assert.equal(model.parseEvent('{"event":"metrics","video_frames":30}').video_frames, 30)
 assert.equal(model.parseEvent("bad"), null)
+const workspaces = model.parseWorkspaces(JSON.stringify({ workspaces: [
+  { name: "1", monitor: "eDP-1", windows: 2, active: true },
+  { name: "web", monitor: "HovenCast-TV", windows: 1, casting: true }
+] }))
+assert.equal(workspaces.error, "")
+assert.equal(workspaces.workspaces.length, 2)
+assert.equal(workspaces.workspaces[0].active, true)
+assert.equal(workspaces.workspaces[1].casting, true)
+assert.match(model.parseWorkspaces("bad").error, /unreadable/)
 const windows = model.parsePickerWindowList(
   "42[HC>]microsoft-edge[HT>]Video[HE>]6538cbb1ada0[HA>]"
   + "84[HC>]chatgpt[HT>]ChatGPT[HE>]6538caece100[HA>]"

@@ -1,5 +1,5 @@
 function version() {
-  return "0.1.1"
+  return "0.2.0"
 }
 
 function parseDiscovery(raw) {
@@ -40,6 +40,32 @@ function parseEvent(raw) {
   } catch (error) {
     return null
   }
+}
+
+function parseWorkspaces(raw) {
+  var result = { workspaces: [], error: "" }
+  try {
+    var parsed = JSON.parse(String(raw || "{}"))
+    if (!parsed || !Array.isArray(parsed.workspaces)) {
+      result.error = "The workspace list is unavailable."
+      return result
+    }
+    for (var i = 0; i < parsed.workspaces.length; i++) {
+      var workspace = parsed.workspaces[i] || {}
+      var name = String(workspace.name || "").trim()
+      if (name === "") continue
+      result.workspaces.push({
+        name: name,
+        monitor: String(workspace.monitor || ""),
+        windows: Number(workspace.windows || 0),
+        active: Boolean(workspace.active),
+        casting: Boolean(workspace.casting)
+      })
+    }
+  } catch (error) {
+    result.error = "The workspace list is unreadable."
+  }
+  return result
 }
 
 function parsePickerWindowList(raw) {
@@ -133,6 +159,7 @@ if (typeof module !== "undefined") {
     version: version,
     parseDiscovery: parseDiscovery,
     parseEvent: parseEvent,
+    parseWorkspaces: parseWorkspaces,
     parsePickerWindowList: parsePickerWindowList,
     displayName: displayName,
     protocolLabel: protocolLabel,
