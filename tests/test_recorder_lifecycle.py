@@ -427,6 +427,136 @@ class RecorderLifecycleTest(unittest.TestCase):
             ["pactl", "move-sink-input", "7", "speakers"],
         )
 
+    @mock.patch("omarchy_cast.process_ancestors", return_value={101, 100})
+    @mock.patch("omarchy_cast.subprocess.run")
+    def test_shared_browser_audio_does_not_follow_monitor_focus(
+        self, run: mock.Mock, _ancestors: mock.Mock
+    ) -> None:
+        tv_focused = [
+            {
+                "name": "eDP-1",
+                "focused": False,
+                "activeWorkspace": {"name": "1"},
+            },
+            {
+                "name": "HovenCast-TV",
+                "focused": True,
+                "activeWorkspace": {"name": "2"},
+            },
+        ]
+        laptop_focused = [
+            {
+                "name": "eDP-1",
+                "focused": True,
+                "activeWorkspace": {"name": "1"},
+            },
+            {
+                "name": "HovenCast-TV",
+                "focused": False,
+                "activeWorkspace": {"name": "2"},
+            },
+        ]
+        sink_input = [
+            {
+                "index": 7,
+                "sink": 10,
+                "properties": {"application.process.id": "101"},
+            }
+        ]
+        clients = [
+            {"address": "0xa", "pid": 100, "workspace": {"name": "1"}},
+            {"address": "0xb", "pid": 100, "workspace": {"name": "2"}},
+        ]
+        run.side_effect = [
+            subprocess.CompletedProcess([], 0, stdout=json.dumps(tv_focused)),
+            subprocess.CompletedProcess([], 0, stdout=json.dumps(sink_input)),
+            subprocess.CompletedProcess(
+                [],
+                0,
+                stdout=json.dumps(
+                    [
+                        {"index": 10, "name": "cast"},
+                        {"index": 20, "name": "speakers"},
+                    ]
+                ),
+            ),
+            subprocess.CompletedProcess([], 0, stdout=json.dumps(clients)),
+            subprocess.CompletedProcess([], 0, stdout=json.dumps(laptop_focused)),
+            subprocess.CompletedProcess([], 0, stdout=json.dumps(sink_input)),
+            subprocess.CompletedProcess([], 0, stdout=json.dumps(clients)),
+        ]
+        route = SilentAudioRoute(io.StringIO())
+        route.sink_name = "cast"
+        route.previous_sink = "speakers"
+        route.module_id = 1
+
+        route.follow_workspace()
+        route.follow_workspace()
+
+        self.assertEqual(route.input_workspaces, {"7": "2"})
+        self.assertFalse(
+            any(call.args[0][1:2] == ["move-sink-input"] for call in run.call_args_list)
+        )
+
+    @mock.patch("omarchy_cast.process_ancestors", return_value={101, 100})
+    @mock.patch("omarchy_cast.subprocess.run")
+    def test_shared_browser_audio_follows_a_window_workspace_move(
+        self, run: mock.Mock, _ancestors: mock.Mock
+    ) -> None:
+        monitors = [
+            {"name": "eDP-1", "activeWorkspace": {"name": "1"}},
+            {"name": "HovenCast-TV", "activeWorkspace": {"name": "2"}},
+        ]
+        sink_input = [
+            {
+                "index": 7,
+                "sink": 10,
+                "properties": {"application.process.id": "101"},
+            }
+        ]
+        before = [
+            {"address": "0xa", "pid": 100, "workspace": {"name": "2"}},
+            {"address": "0xb", "pid": 100, "workspace": {"name": "1"}},
+            {"address": "0xc", "pid": 100, "workspace": {"name": "2"}},
+        ]
+        after = [
+            {"address": "0xa", "pid": 100, "workspace": {"name": "1"}},
+            {"address": "0xb", "pid": 100, "workspace": {"name": "1"}},
+            {"address": "0xc", "pid": 100, "workspace": {"name": "2"}},
+        ]
+        run.side_effect = [
+            subprocess.CompletedProcess([], 0, stdout=json.dumps(monitors)),
+            subprocess.CompletedProcess([], 0, stdout=json.dumps(sink_input)),
+            subprocess.CompletedProcess(
+                [],
+                0,
+                stdout=json.dumps(
+                    [
+                        {"index": 10, "name": "cast"},
+                        {"index": 20, "name": "speakers"},
+                    ]
+                ),
+            ),
+            subprocess.CompletedProcess([], 0, stdout=json.dumps(before)),
+            subprocess.CompletedProcess([], 0, stdout=json.dumps(monitors)),
+            subprocess.CompletedProcess([], 0, stdout=json.dumps(sink_input)),
+            subprocess.CompletedProcess([], 0, stdout=json.dumps(after)),
+            subprocess.CompletedProcess([], 0),
+        ]
+        route = SilentAudioRoute(io.StringIO())
+        route.sink_name = "cast"
+        route.previous_sink = "speakers"
+        route.module_id = 1
+
+        route.follow_workspace()
+        route.follow_workspace()
+
+        self.assertEqual(route.input_workspaces, {"7": "1"})
+        self.assertEqual(
+            run.call_args_list[-1].args[0],
+            ["pactl", "move-sink-input", "7", "speakers"],
+        )
+
     def test_stop_closes_fifo_consumers_before_pipeline(self) -> None:
         calls: list[str] = []
         recorder = Recorder.__new__(Recorder)

@@ -274,6 +274,7 @@ class SilentAudioRoute:
         self.previous_sink: str | None = None
         self.module_id: int | None = None
         self.input_workspaces: dict[str, str] = {}
+        self.client_window_workspaces: dict[str, tuple[int, str]] = {}
         self.last_tv_workspace = ""
         self.cast_sink_id = ""
         self.laptop_sink_id = ""
@@ -378,10 +379,6 @@ class SilentAudioRoute:
         if tv_monitor is None:
             return
         tv_workspace = str((tv_monitor.get("activeWorkspace") or {}).get("name", ""))
-        focused_monitor = next((item for item in monitors if item.get("focused")), None)
-        focused_workspace = str(
-            ((focused_monitor or {}).get("activeWorkspace") or {}).get("name", "")
-        )
         if not tv_workspace:
             return
         if not self.cast_sink_id or not self.laptop_sink_id:
@@ -394,15 +391,25 @@ class SilentAudioRoute:
         if not self.cast_sink_id or not self.laptop_sink_id:
             return
         client_workspaces: dict[int, set[str]] = {}
+        moved_workspaces: dict[int, set[tuple[str, str]]] = {}
+        current_client_windows: dict[str, tuple[int, str]] = {}
         clients = self._json_command(["hyprctl", "-j", "clients"])
         for client in clients:
             try:
                 client_pid = int(client.get("pid", 0))
             except (TypeError, ValueError):
                 continue
+            address = str(client.get("address", ""))
             workspace = str((client.get("workspace") or {}).get("name", ""))
             if client_pid > 0 and workspace and not workspace.startswith("special:"):
                 client_workspaces.setdefault(client_pid, set()).add(workspace)
+                if address:
+                    current_client_windows[address] = (client_pid, workspace)
+                    previous_client = self.client_window_workspaces.get(address)
+                    if previous_client and previous_client[1] != workspace:
+                        moved_workspaces.setdefault(client_pid, set()).add(
+                            (previous_client[1], workspace)
+                        )
         active_input_ids: set[str] = set()
         tv_inputs = 0
         laptop_inputs = 0
@@ -417,17 +424,26 @@ class SilentAudioRoute:
             except (TypeError, ValueError):
                 stream_pid = 0
             candidates: set[str] = set()
+            transitions: set[tuple[str, str]] = set()
             for ancestor in process_ancestors(stream_pid):
                 candidates.update(client_workspaces.get(ancestor, set()))
+                transitions.update(moved_workspaces.get(ancestor, set()))
             previous_workspace = self.input_workspaces.get(input_id, "")
             if len(candidates) == 1:
                 workspace = next(iter(candidates))
-            elif focused_workspace in candidates:
-                workspace = focused_workspace
+            elif len(transitions) == 1:
+                previous, current = next(iter(transitions))
+                workspace = (
+                    current
+                    if previous_workspace in {"", previous}
+                    else previous_workspace
+                )
+            elif previous_workspace in candidates:
+                workspace = previous_workspace
             elif tv_workspace in candidates:
                 workspace = tv_workspace
             else:
-                workspace = previous_workspace or focused_workspace or tv_workspace
+                workspace = previous_workspace or tv_workspace
             if workspace != previous_workspace:
                 self.input_workspaces[input_id] = workspace
                 emit(
@@ -463,6 +479,7 @@ class SilentAudioRoute:
             for input_id, workspace in self.input_workspaces.items()
             if input_id in active_input_ids
         }
+        self.client_window_workspaces = current_client_windows
         if tv_workspace != self.last_tv_workspace:
             emit(
                 self.event_file,
@@ -513,6 +530,7 @@ class SilentAudioRoute:
             )
         self.module_id = None
         self.input_workspaces.clear()
+        self.client_window_workspaces.clear()
         self.last_tv_workspace = ""
         self.cast_sink_id = ""
         self.laptop_sink_id = ""

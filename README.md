@@ -132,8 +132,9 @@ screen capture before attaching diagnostics.
 - Receiver reconnect, network-roaming, suspend/resume, and long-duration
   reliability need broader field testing.
 - Browsers may share one audio process across multiple windows. If windows from
-  the same browser process occupy both displays, HovenCast uses the focused
-  workspace to resolve which display should receive that shared audio stream.
+  the same browser process occupy both displays, HovenCast keeps that shared
+  stream on its established display until an associated window changes
+  workspace; it cannot identify the individual tab producing the audio.
 - A compositor crash removes the headless output itself; HovenCast restores any
   remaining saved state on the next command, but applications may decide to
   resize or reposition their own windows after an output disappears.
