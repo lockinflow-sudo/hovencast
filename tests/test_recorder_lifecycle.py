@@ -465,7 +465,7 @@ class RecorderLifecycleTest(unittest.TestCase):
         recorder.output_stall_ticks = 7
         recorder.previous_capture_frames = 300
         recorder.previous_video_frames = 150
-        recorder.window_capture_stall_ticks = 0
+        recorder.capture_stall_ticks = 0
         recorder.window_video_stall_ticks = 0
         recorder.window_video_recovery_attempts = 0
         recorder.source_kind = "screen"
@@ -483,6 +483,47 @@ class RecorderLifecycleTest(unittest.TestCase):
         self.assertEqual(reasons, ["output-stalled"])
         self.assertEqual(recorder.exit_code, 1)
         self.assertIn('"event": "output-stalled"', recorder.event_file.getvalue())
+
+    def test_stalled_workspace_capture_triggers_watchdog(self) -> None:
+        reasons: list[str] = []
+        recorder = Recorder.__new__(Recorder)
+        recorder.stopping = False
+        recorder.sender_process = object()
+        recorder.event_file = io.StringIO()
+        recorder.counters = Counters(
+            capture_frames=158,
+            last_capture_monotonic=time.monotonic() - 10,
+            video_frames=267,
+            audio_buffers=124,
+            video_bytes=4_000,
+            audio_bytes=2_000,
+        )
+        recorder.previous_bytes = 6_000
+        recorder.output_stall_ticks = 0
+        recorder.previous_capture_frames = 158
+        recorder.previous_video_frames = 267
+        recorder.capture_stall_ticks = 7
+        recorder.window_video_stall_ticks = 0
+        recorder.window_video_recovery_attempts = 0
+        recorder.source_kind = "workspace"
+        recorder.exit_code = 0
+
+        def stop(reason: str) -> None:
+            reasons.append(reason)
+            recorder.stopping = True
+
+        recorder._stop = stop
+
+        result = recorder._metrics()
+
+        self.assertEqual(result, GLib.SOURCE_REMOVE)
+        self.assertEqual(reasons, ["capture-stalled"])
+        self.assertEqual(recorder.exit_code, 1)
+        events = [json.loads(line) for line in recorder.event_file.getvalue().splitlines()]
+        self.assertEqual(events[0]["event"], "metrics")
+        stalled = events[-1]
+        self.assertEqual(stalled["event"], "output-stalled")
+        self.assertEqual(stalled["cause"], "portal-capture")
 
     def test_window_stall_restarts_only_video_branch(self) -> None:
         names = (

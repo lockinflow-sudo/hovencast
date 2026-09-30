@@ -590,7 +590,7 @@ class Recorder:
         self.output_stall_ticks = 0
         self.previous_capture_frames = 0
         self.previous_video_frames = 0
-        self.window_capture_stall_ticks = 0
+        self.capture_stall_ticks = 0
         self.window_video_stall_ticks = 0
         self.window_video_recovery_attempts = 0
         self.source_kind = "unknown"
@@ -1053,24 +1053,29 @@ class Recorder:
         output_was_started = (
             self.counters.video_frames > 0 and self.counters.audio_buffers > 0
         )
-        if self.source_kind == "window" and output_was_started:
+        if output_was_started:
             if capture_is_live:
-                self.window_capture_stall_ticks = 0
+                self.capture_stall_ticks = 0
             else:
-                self.window_capture_stall_ticks += 1
-                if self.window_capture_stall_ticks >= 8:
+                self.capture_stall_ticks += 1
+                if self.capture_stall_ticks >= 8:
                     self.exit_code = 1
+                    window_source = self.source_kind == "window"
                     emit(
                         self.event_file,
                         "output-stalled",
-                        error="The display capture behind the selected window stopped.",
-                        cause="window-monitor-source",
-                        stall_seconds=self.window_capture_stall_ticks,
+                        error=(
+                            "The display capture behind the selected window stopped."
+                            if window_source
+                            else "The display capture stopped delivering frames."
+                        ),
+                        cause=("window-monitor-source" if window_source else "portal-capture"),
+                        stall_seconds=self.capture_stall_ticks,
                         capture_frames=self.counters.capture_frames,
                         video_frames=self.counters.video_frames,
                         audio_buffers=self.counters.audio_buffers,
                     )
-                    self._stop("window-monitor-source-stalled")
+                    self._stop("capture-stalled")
                     return GLib.SOURCE_REMOVE
         capture_advanced = self.counters.capture_frames > self.previous_capture_frames
         video_advanced = self.counters.video_frames > self.previous_video_frames
