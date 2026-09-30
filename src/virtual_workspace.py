@@ -21,7 +21,7 @@ def _runtime_root(required: bool = True) -> pathlib.Path | None:
         if required:
             raise RuntimeError("HovenCast requires XDG_RUNTIME_DIR")
         return None
-    root = pathlib.Path(value) / "omacast"
+    root = pathlib.Path(value) / "hovencast"
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     root.chmod(0o700)
     return root
@@ -406,7 +406,7 @@ class VirtualWorkspace:
         runtime = os.environ.get("XDG_RUNTIME_DIR", "").strip()
         if not runtime:
             raise RuntimeError("HovenCast requires XDG_RUNTIME_DIR")
-        picker_root = pathlib.Path(runtime) / "omacast-picker"
+        picker_root = pathlib.Path(runtime) / "hovencast-picker"
         picker_root.mkdir(mode=0o700, parents=True, exist_ok=True)
         picker_root.chmod(0o700)
         target = picker_root / "auto-selection.json"
@@ -428,7 +428,7 @@ class VirtualWorkspace:
     def disarm_auto_picker(self) -> None:
         runtime = os.environ.get("XDG_RUNTIME_DIR", "").strip()
         if runtime:
-            (pathlib.Path(runtime) / "omacast-picker" / "auto-selection.json").unlink(
+            (pathlib.Path(runtime) / "hovencast-picker" / "auto-selection.json").unlink(
                 missing_ok=True
             )
 

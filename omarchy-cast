@@ -3,4 +3,14 @@
 set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source_file="$root/src/wfd_sender.c"
+sender="$root/build/wfd-sender"
+source_hash_file="$root/build/wfd-sender.source.sha256"
+source_hash="$(sha256sum "$source_file" | awk '{print $1}')"
+built_hash="$(cat "$source_hash_file" 2>/dev/null || true)"
+
+if [[ ! -x "$sender" || "$built_hash" != "$source_hash" ]]; then
+  "$root/build-backend"
+fi
+
 exec python "$root/src/omarchy_cast.py" "$@"

@@ -561,7 +561,7 @@ int main(int argc, char **argv) {
   if (!friendly_name || !*friendly_name)
     friendly_name = "Omarchy";
   if (!source_id || !*source_id)
-    source_id = "OmaCastSender001";
+    source_id = "HovenCastSender1";
   g_autoptr(GError) error = NULL;
   g_autofree char *bind_address = route_address_for_receiver(receiver, &error);
   if (!bind_address) {

@@ -4,10 +4,6 @@ HovenCast is an Omarchy bar plugin that turns a compatible Roku TV into a
 wireless Hyprland workspace. It can also share one application window, with
 desktop audio, over the same local network.
 
-Previously published as OmaCast. The installed plugin ID (`hoven.cast`),
-command names, and runtime paths remain unchanged so existing installations
-can update without reinstalling.
-
 Version 0.2.0 uses Miracast over Infrastructure (MICE). It has been physically
 tested with TCL Roku models 32S331, 55S405, and 65S451. Other Roku TVs that
 advertise MICE and provide valid Roku device information are shown as
@@ -30,14 +26,18 @@ or recording is included.
 
 ## Install
 
+Version 0.2.0 uses HovenCast-only setup commands and runtime paths. Before
+installing it over an earlier build, run that build's bundled uninstaller and
+remove the installed plugin.
+
 ```sh
 omarchy plugin add https://github.com/lockinflow-sudo/hovencast.git --enable
-~/.config/omarchy/plugins/hoven.cast/omacast-setup
+~/.config/omarchy/plugins/hoven.cast/hovencast-setup
 ```
 
 Setup changes `~/.config/hypr/xdph.conf` and restarts the user portal services.
 The prior values and a full pre-install copy are stored under
-`${XDG_STATE_HOME:-~/.local/state}/omacast/` for safe removal.
+`${XDG_STATE_HOME:-~/.local/state}/hovencast/` for safe removal.
 Setup changes only `custom_picker_binary`; it preserves your existing
 `allow_token_by_default` preference.
 
@@ -62,12 +62,13 @@ keyboard focus. Omarchy's existing **Ctrl+Alt+Tab** and
 **Ctrl+Alt+Shift+Tab** monitor-focus shortcuts also move between the laptop and
 TV, including when the widget is no longer focused.
 
-Audio moves to the TV while casting by default and is restored afterward.
-Enable **Keep audio on this computer** in the widget settings to play it
-locally too. HovenCast restores the previous audio sink and workspace layout on
-normal stop. A detached guard restores the workspaces and removes the headless
-output if the casting backend crashes; the next HovenCast command also recovers
-stale state.
+During virtual-workspace casting, audio follows its application window between
+the laptop and TV workspaces. During application-window casting, audio moves to
+the TV for the session. Enable **Keep audio on this computer** in the widget
+settings to keep audio local while also sending it to the TV. HovenCast restores
+the previous audio sink and workspace layout on normal stop. A detached guard
+restores the workspaces and removes the headless output if the casting backend
+crashes; the next HovenCast command also recovers stale state.
 
 Window sharing captures the selected monitor and crops it to the chosen window,
 following that window as its geometry changes. Keep private windows off that
@@ -89,7 +90,7 @@ Restore the external portal setting before deleting the plugin:
 
 ```sh
 omarchy plugin disable hoven.cast
-~/.config/omarchy/plugins/hoven.cast/omacast-uninstall
+~/.config/omarchy/plugins/hoven.cast/hovencast-uninstall
 omarchy plugin remove hoven.cast
 ```
 
@@ -98,7 +99,7 @@ managed value after setup, it leaves that value alone instead of overwriting
 your newer configuration.
 
 `omarchy plugin remove` does not run plugin uninstall hooks. If the plugin was
-removed first, clone the same release again and run `./omacast-uninstall`; its
+removed first, clone the same release again and run `./hovencast-uninstall`; its
 restore state is kept outside the plugin directory.
 
 ## Privacy and files
@@ -108,7 +109,7 @@ upload the capture. Its RTSP listener binds only to the receiver-facing local
 address and rejects connections not originating from the selected TV. It does
 not save screen recordings. The picker preview is deleted as soon as selection
 ends. A small newline-delimited diagnostic event log is replaced for each
-session under `$XDG_RUNTIME_DIR/omacast/` and normally disappears at logout.
+session under `$XDG_RUNTIME_DIR/hovencast/` and normally disappears at logout.
 
 See [SECURITY.md](SECURITY.md) for the trust model, residual risks, and private
 reporting guidance.
@@ -130,8 +131,9 @@ screen capture before attaching diagnostics.
   not supported.
 - Receiver reconnect, network-roaming, suspend/resume, and long-duration
   reliability need broader field testing.
-- Audio routing is session-wide, not per workspace. With local audio disabled,
-  existing desktop streams move to the cast sink until the session stops.
+- Browsers may share one audio process across multiple windows. If windows from
+  the same browser process occupy both displays, HovenCast uses the focused
+  workspace to resolve which display should receive that shared audio stream.
 - A compositor crash removes the headless output itself; HovenCast restores any
   remaining saved state on the next command, but applications may decide to
   resize or reposition their own windows after an output disappears.

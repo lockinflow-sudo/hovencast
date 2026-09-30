@@ -12,4 +12,4 @@ fi
 python "$root/scripts/portal_config.py" remove
 systemctl --user restart xdg-desktop-portal-hyprland.service xdg-desktop-portal.service
 
-echo "HovenCast portal configuration restored. You can now run: omarchy plugin remove hoven.cast"
+echo "HovenCast cleanup complete. You can now run: omarchy plugin remove hoven.cast"

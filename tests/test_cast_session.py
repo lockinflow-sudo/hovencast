@@ -24,7 +24,7 @@ def arguments(**overrides: object) -> argparse.Namespace:
         "address": "192.168.1.240",
         "receiver_name": "Bedroom TV",
         "name": "HovenCast",
-        "source_id": "OmaCastSender001",
+        "source_id": "HovenCastSender1",
         "duration": 0,
         "quality": "720p",
         "workspace": "1",
@@ -46,7 +46,7 @@ class CastSessionTest(unittest.TestCase):
     def test_snapshot_reconnects_to_running_stream(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             runtime = pathlib.Path(temporary)
-            state_root = runtime / "omacast"
+            state_root = runtime / "hovencast"
             state_root.mkdir()
             (state_root / "cast-session.json").write_text(
                 json.dumps(
@@ -99,7 +99,7 @@ class CastSessionTest(unittest.TestCase):
             with mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(runtime)}):
                 run_session_start(arguments())
                 state = json.loads(
-                    (runtime / "omacast/cast-session.json").read_text(encoding="utf-8")
+                    (runtime / "hovencast/cast-session.json").read_text(encoding="utf-8")
                 )
 
         self.assertEqual(state["pid"], 4242)

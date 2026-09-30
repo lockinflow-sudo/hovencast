@@ -47,7 +47,7 @@ def runtime_root(required: bool = False) -> pathlib.Path | None:
         if required:
             raise RuntimeError("HovenCast requires XDG_RUNTIME_DIR")
         return None
-    root = pathlib.Path(value) / "omacast"
+    root = pathlib.Path(value) / "hovencast"
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     root.chmod(0o700)
     return root
@@ -120,7 +120,7 @@ def arm_picker_target(ipc_target: str) -> pathlib.Path:
     runtime_dir = os.environ.get("XDG_RUNTIME_DIR", "").strip()
     if not runtime_dir:
         raise RuntimeError("HovenCast requires XDG_RUNTIME_DIR")
-    picker_root = pathlib.Path(runtime_dir) / "omacast-picker"
+    picker_root = pathlib.Path(runtime_dir) / "hovencast-picker"
     picker_root.mkdir(mode=0o700, parents=True, exist_ok=True)
     picker_root.chmod(0o700)
     target = picker_root / "ipc-target.json"
@@ -169,7 +169,7 @@ def picker_source_info() -> dict[str, Any]:
     runtime_dir = os.environ.get("XDG_RUNTIME_DIR", "").strip()
     if not runtime_dir:
         return {"kind": "unknown"}
-    selection_file = pathlib.Path(runtime_dir) / "omacast-picker" / "source-selection"
+    selection_file = pathlib.Path(runtime_dir) / "hovencast-picker" / "source-selection"
     try:
         raw = selection_file.read_text(encoding="utf-8").strip()
     except OSError:
@@ -1409,7 +1409,7 @@ def run_cast_artifact(args: argparse.Namespace) -> int:
     root = pathlib.Path(__file__).resolve().parents[1]
     helper = root / "build" / "wfd-sender"
     if not helper.is_file():
-        raise RuntimeError("run ./omacast-setup before casting")
+        raise RuntimeError("run ./hovencast-setup before casting")
     environment = dict(os.environ)
     environment["OMARCHY_CAST_FRIENDLY_NAME"] = args.name
     environment["OMARCHY_CAST_SOURCE_ID"] = args.source_id
@@ -1425,7 +1425,7 @@ def run_cast_live(args: argparse.Namespace) -> int:
     root = pathlib.Path(__file__).resolve().parents[1]
     helper = root / "build" / "wfd-sender"
     if not helper.is_file():
-        raise RuntimeError("run ./omacast-setup before casting")
+        raise RuntimeError("run ./hovencast-setup before casting")
     session_root = runtime_root(required=True)
     assert session_root is not None
     event_path = session_root / "session.events.jsonl"
@@ -1816,8 +1816,8 @@ def run_workspace_guard(args: argparse.Namespace) -> int:
 def add_cast_arguments(parser: argparse.ArgumentParser, *, detached: bool = False) -> None:
     parser.add_argument("--address", required=True)
     parser.add_argument("--name", default="HovenCast")
-    # Keep the original sender ID so Roku approvals survive the HovenCast rename.
-    parser.add_argument("--source-id", default="OmaCastSender001")
+    # MICE source IDs are exactly 16 bytes.
+    parser.add_argument("--source-id", default="HovenCastSender1")
     parser.add_argument(
         "--duration",
         type=int,

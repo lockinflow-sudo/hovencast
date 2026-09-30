@@ -45,7 +45,7 @@ done
 
 python -c 'import gi; gi.require_version("Gst", "1.0"); gi.require_version("Xdp", "1.0"); from gi.repository import Gst, Xdp'
 "$root/build-backend"
-python "$root/scripts/portal_config.py" install --picker "$root/omarchy-cast-picker"
+python "$root/scripts/portal_config.py" install --picker "$root/hovencast-picker"
 systemctl --user restart xdg-desktop-portal-hyprland.service xdg-desktop-portal.service
 
 echo "HovenCast setup complete. The backend was built locally and the portal picker is active."

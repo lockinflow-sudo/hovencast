@@ -29,7 +29,7 @@ def read_mice_message(connection: socket.socket) -> bytes:
 
 
 class WfdSenderLifecycleTest(unittest.TestCase):
-    def test_source_ready_is_followed_by_stop_projection(self) -> None:
+    def exercise_sender(self, timeout: int, terminate: bool = False) -> None:
         if not SENDER.exists():
             self.skipTest("wfd-sender has not been built")
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
@@ -42,7 +42,7 @@ class WfdSenderLifecycleTest(unittest.TestCase):
             listener.settimeout(5)
             with tempfile.NamedTemporaryFile() as artifact:
                 process = subprocess.Popen(
-                    [str(SENDER), "127.0.0.1", artifact.name, "1"],
+                    [str(SENDER), "127.0.0.1", artifact.name, str(timeout)],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
@@ -52,6 +52,8 @@ class WfdSenderLifecycleTest(unittest.TestCase):
                     with connection:
                         connection.settimeout(5)
                         source_ready = read_mice_message(connection)
+                        if terminate:
+                            process.terminate()
                         stop_projection = read_mice_message(connection)
                     stdout, stderr = process.communicate(timeout=5)
                 finally:
@@ -64,8 +66,14 @@ class WfdSenderLifecycleTest(unittest.TestCase):
         self.assertIn(bytes([2, 0, 2, 0x1C, 0x44]), source_ready)
         self.assertEqual(stop_projection[2:4], bytes([1, 2]))
         self.assertNotIn(bytes([2, 0, 2, 0x1C, 0x44]), stop_projection)
-        self.assertTrue(stop_projection.endswith(bytes([3, 0, 16]) + b"OmaCastSender001"))
+        self.assertTrue(stop_projection.endswith(bytes([3, 0, 16]) + b"HovenCastSender1"))
         self.assertIn('"event":"mice-stop-projection","detail":"sent"', stdout)
+
+    def test_timeout_sends_stop_projection(self) -> None:
+        self.exercise_sender(timeout=1)
+
+    def test_sigterm_sends_stop_projection(self) -> None:
+        self.exercise_sender(timeout=0, terminate=True)
 
 
 if __name__ == "__main__":

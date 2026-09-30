@@ -26,7 +26,7 @@ from omarchy_cast import (  # noqa: E402
     window_crop_geometry,
 )
 
-PICKER = pathlib.Path(__file__).resolve().parents[1] / "omarchy-cast-picker"
+PICKER = pathlib.Path(__file__).resolve().parents[1] / "hovencast-picker"
 
 
 class FakeProcess:
@@ -99,7 +99,7 @@ class RecorderLifecycleTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             runtime = root / "runtime"
-            picker_root = runtime / "omacast-picker"
+            picker_root = runtime / "hovencast-picker"
             fake_bin = root / "bin"
             picker_root.mkdir(parents=True)
             fake_bin.mkdir()
@@ -187,7 +187,7 @@ class RecorderLifecycleTest(unittest.TestCase):
                 stderr=subprocess.PIPE,
                 check=True,
             )
-            selection = runtime / "omacast-picker/source-selection"
+            selection = runtime / "hovencast-picker/source-selection"
 
             self.assertEqual(result.stdout.strip(), "[SELECTION]/screen:eDP-1")
             self.assertTrue(selection.exists())
@@ -206,7 +206,7 @@ class RecorderLifecycleTest(unittest.TestCase):
     ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             runtime = pathlib.Path(temporary)
-            state_root = runtime / "omacast"
+            state_root = runtime / "hovencast"
             state_root.mkdir()
             (state_root / "audio-route.json").write_text(
                 json.dumps(
@@ -231,7 +231,7 @@ class RecorderLifecycleTest(unittest.TestCase):
     ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             runtime = pathlib.Path(temporary)
-            state_root = runtime / "omacast"
+            state_root = runtime / "hovencast"
             state_root.mkdir()
             (state_root / "audio-route.json").write_text(
                 json.dumps(

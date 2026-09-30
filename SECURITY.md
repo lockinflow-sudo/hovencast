@@ -33,7 +33,7 @@ the crop is sent. Use screen or region sharing, or keep sensitive windows off
 that monitor, when this distinction matters.
 
 Temporary picker images, session logs, and crash-recovery state live under
-`$XDG_RUNTIME_DIR/omacast/` with user-only permissions. The picker image is
+`$XDG_RUNTIME_DIR/hovencast/` with user-only permissions. The picker image is
 deleted after selection, and the runtime directory normally disappears at
 logout. HovenCast does not intentionally create screen-recording files.
 

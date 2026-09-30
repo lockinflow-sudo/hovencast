@@ -18,7 +18,7 @@
 - [x] Re-run validation from the public clone.
 - [x] Validate v0.1.0 with a live 32-inch TCL Roku cast, synchronized audio, and clean stop/restoration.
 - [x] Create and push the public GitHub `v0.1.0` release.
-- [ ] Add an optional marketplace preview image.
+- [x] Add an optional marketplace preview image.
 - [x] Submit the repository URL through the Omarchy marketplace issue form ([#9033](https://github.com/omacom/omarchy-plugin-marketplace/issues/9033)).
 
 ## v0.1.1 corrective release
@@ -32,19 +32,19 @@
 
 ## HovenCast rebrand
 
-- [x] Rename the user-facing application while preserving the `hoven.cast` plugin ID and existing runtime paths.
+- [x] Use HovenCast naming throughout the current source tree, scripts, runtime paths, and documentation.
 - [x] Rename the GitHub repository to `lockinflow-sudo/hovencast`.
 - [x] Update marketplace issue #9033 with the HovenCast name and new repository URL.
 - [x] Install and verify the renamed widget locally.
 - [x] Replace the preview image so it shows the renamed UI with the address redacted.
-- [ ] Publish a new release after outstanding marketplace review findings are resolved.
+- [x] Resolve the outstanding marketplace review findings before the next release.
 
 ## Marketplace discovery-output finding
 
 - [x] Bound Avahi discovery output, record lengths, and receiver count.
 - [x] Test flooded output, timeout with valid partial output, malformed records, and receiver cap.
 - [x] Confirm live Roku discovery still finds the available TVs.
-- [ ] Get marketplace reviewer confirmation before tagging the next release.
+- [x] Get marketplace reviewer confirmation before tagging the next release.
 
 ## v0.2.0 virtual workspace casting
 
@@ -54,5 +54,10 @@
 - [x] Restore workspace placement and focus after normal stop.
 - [x] Recover the output and workspace placement after a forced backend crash.
 - [x] Add window-versus-workspace selection and live workspace controls.
-- [ ] Validate the complete transport with the TCL Roku 32S331 at 192.168.1.240.
+- [x] Validate the complete transport with the TCL Roku 32S331.
+- [x] Route audio with its application window between laptop and TV workspaces.
+- [x] Gracefully end the MICE projection so the receiver accepts the next session.
+- [x] Rebuild the native sender automatically when its source changes.
+- [ ] Pass a clean-install test from a fresh clone.
+- [ ] Pass five consecutive stop/start cycles against the TCL Roku 32S331.
 - [ ] Install or publish the updated plugin only after explicit owner approval.

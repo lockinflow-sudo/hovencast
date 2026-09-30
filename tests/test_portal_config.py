@@ -22,7 +22,7 @@ class PortalConfigTest(unittest.TestCase):
         root = pathlib.Path(self.temporary.name)
         self.config_home = root / "config"
         self.state_home = root / "state"
-        self.picker = root / "plugin/omarchy-cast-picker"
+        self.picker = root / "plugin/hovencast-picker"
         self.picker.parent.mkdir(parents=True)
         self.picker.write_text("#!/bin/bash\n", encoding="utf-8")
         self.environment = mock.patch.dict(
@@ -56,7 +56,7 @@ class PortalConfigTest(unittest.TestCase):
 
         portal_config.remove()
         self.assertEqual(target.read_text(encoding="utf-8"), original)
-        self.assertFalse((self.state_home / "omacast/portal.json").exists())
+        self.assertFalse((self.state_home / "hovencast/portal.json").exists())
 
     def test_remove_does_not_overwrite_a_later_user_change(self) -> None:
         portal_config.install(self.picker)
@@ -73,10 +73,10 @@ class PortalConfigTest(unittest.TestCase):
     def test_state_records_a_full_pre_install_backup(self) -> None:
         portal_config.install(self.picker)
         state = json.loads(
-            (self.state_home / "omacast/portal.json").read_text(encoding="utf-8")
+            (self.state_home / "hovencast/portal.json").read_text(encoding="utf-8")
         )
         self.assertEqual(state["version"], 1)
-        self.assertTrue((self.state_home / "omacast/xdph.conf.before-omacast").exists())
+        self.assertTrue((self.state_home / "hovencast/xdph.conf.before-hovencast").exists())
 
     def test_remove_restores_legacy_allow_token_state(self) -> None:
         target = self.config_home / "hypr/xdph.conf"
@@ -88,7 +88,7 @@ class PortalConfigTest(unittest.TestCase):
             "}\n",
             encoding="utf-8",
         )
-        state_root = self.state_home / "omacast"
+        state_root = self.state_home / "hovencast"
         state_root.mkdir(parents=True)
         (state_root / "portal.json").write_text(
             json.dumps(

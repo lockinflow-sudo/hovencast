@@ -26,7 +26,7 @@ def config_path() -> pathlib.Path:
 
 def state_dir() -> pathlib.Path:
     state_home = pathlib.Path(os.environ.get("XDG_STATE_HOME", pathlib.Path.home() / ".local/state"))
-    return state_home / "omacast"
+    return state_home / "hovencast"
 
 
 def find_section(lines: list[str]) -> tuple[int, int] | None:
@@ -110,7 +110,7 @@ def install(picker: pathlib.Path) -> None:
     target = config_path()
     state_root = state_dir()
     state_file = state_root / "portal.json"
-    backup_file = state_root / "xdph.conf.before-omacast"
+    backup_file = state_root / "xdph.conf.before-hovencast"
     picker = picker.resolve(strict=True)
 
     existed = target.exists()
@@ -152,7 +152,7 @@ def install(picker: pathlib.Path) -> None:
 def remove() -> None:
     state_root = state_dir()
     state_file = state_root / "portal.json"
-    backup_file = state_root / "xdph.conf.before-omacast"
+    backup_file = state_root / "xdph.conf.before-hovencast"
     if not state_file.exists():
         print("No saved HovenCast portal state; nothing to restore")
         return

@@ -2,7 +2,7 @@
 
 set -u
 
-ipc_target="${OMACAST_IPC_TARGET:-hoven.cast}"
+ipc_target="${HOVENCAST_IPC_TARGET:-hoven.cast}"
 allow_token=""
 for argument in "$@"; do
   if [[ "$argument" == "--allow-token" ]]; then
@@ -15,7 +15,7 @@ if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
   exit 1
 fi
 
-runtime_root="$XDG_RUNTIME_DIR/omacast-picker"
+runtime_root="$XDG_RUNTIME_DIR/hovencast-picker"
 mkdir -p -m 700 "$runtime_root"
 chmod 700 "$runtime_root"
 selection_file="$runtime_root/source-selection"

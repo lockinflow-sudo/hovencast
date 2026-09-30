@@ -47,6 +47,6 @@ assert.equal(model.connectionLabel("miracast-p2p"), "WI-FI DIRECT")
 assert.equal(model.resolutionLabel({ nativeHeight: 720 }), "720P")
 assert.equal(model.humanBitrate(6100000), "6.1 Mbps")
 assert.equal(model.stateLabel("streaming"), "SHARING YOUR SCREEN")
-assert.equal(model.localPath("file:///tmp/OmaCast%20Test/omarchy-cast"), "/tmp/OmaCast Test/omarchy-cast")
+assert.equal(model.localPath("file:///tmp/HovenCast%20Test/omarchy-cast"), "/tmp/HovenCast Test/omarchy-cast")
 
 console.log("model tests passed")

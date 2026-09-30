@@ -35,7 +35,7 @@ class MiceSourceReadyTest(unittest.TestCase):
         self.assertEqual(struct.unpack(">H", message[:2])[0], len(message))
         self.assertEqual(message[2:4], bytes([1, 1]))
         self.assertIn(bytes([2, 0, 2, 0x1C, 0x44]), message)
-        self.assertTrue(message.endswith(bytes([3, 0, 16]) + b"OmaCastSender001"))
+        self.assertTrue(message.endswith(bytes([3, 0, 16]) + b"HovenCastSender1"))
 
     def test_name_is_bom_prefixed_utf16le(self) -> None:
         message = build_mice_source_ready("Desk")

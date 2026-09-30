@@ -1143,7 +1143,11 @@ Panel {
 
               Text {
                 width: parent.width
-                text: root.keepLocalAudio ? "Audio plays here and on the TV" : "Audio moves to the TV while sharing"
+                text: root.keepLocalAudio
+                  ? "Audio plays here and on the TV"
+                  : (root.sourceMode === "workspace"
+                    ? "Audio follows its window between displays"
+                    : "Audio moves to the TV while sharing")
                 color: root.dim
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption

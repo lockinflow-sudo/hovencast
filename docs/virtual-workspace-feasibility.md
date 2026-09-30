@@ -34,9 +34,9 @@ The stable capture source is the output, not a particular workspace. Workspace
 switching is therefore a Hyprland operation only; it does not renegotiate the
 Roku connection, portal session, PipeWire node, encoder, or MPEG transport.
 
-## Remaining hardware validation
+## Hardware validation
 
-The capture and lifecycle path is proven locally. The complete v0.2.0 path still
-needs a live end-to-end session with the TCL Roku 32S331 at 192.168.1.240. No
-transport or receiver changes were made in this branch; it retains the
-known-good MICE/WFD sender from the clean main baseline.
+The complete v0.2.0 path was validated end to end with a TCL Roku 32S331. The
+test covered sustained video and audio playback, workspace switching, keyboard
+and pointer focus, moving application windows between the laptop and TV, audio
+following those windows, clean stop, and receiver reconnection.

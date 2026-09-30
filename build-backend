@@ -6,7 +6,9 @@ root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 mkdir -p "$root/build"
 output="$root/build/wfd-sender"
 temporary="$output.tmp.$$"
-trap 'rm -f "$temporary"' EXIT
+source_hash_output="$root/build/wfd-sender.source.sha256"
+temporary_hash="$source_hash_output.tmp.$$"
+trap 'rm -f "$temporary" "$temporary_hash"' EXIT
 
 cc -std=gnu17 -Wall -Wextra -Werror -O2 \
   $(pkg-config --cflags gstreamer-1.0 gstreamer-rtsp-1.0 gstreamer-rtsp-server-1.0 gio-2.0) \
@@ -16,3 +18,6 @@ cc -std=gnu17 -Wall -Wextra -Werror -O2 \
 
 chmod 755 "$temporary"
 mv -f "$temporary" "$output"
+sha256sum "$root/src/wfd_sender.c" | awk '{print $1}' >"$temporary_hash"
+chmod 644 "$temporary_hash"
+mv -f "$temporary_hash" "$source_hash_output"
