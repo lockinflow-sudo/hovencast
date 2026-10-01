@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import pathlib
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -12,10 +13,13 @@ from unittest import mock
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
 from omarchy_cast import (  # noqa: E402
+    _last_session_failure,
     cast_live_command,
     cast_session_snapshot,
     process_start_ticks,
+    run_session_runner,
     run_session_start,
+    session_runner_command,
 )
 
 
@@ -42,6 +46,9 @@ class CastSessionTest(unittest.TestCase):
         self.assertIn("cast-live", command)
         self.assertEqual(command[command.index("--workspace") + 1], "1")
         self.assertEqual(command[command.index("--ipc-target") + 1], "hoven.cast")
+
+        runner = session_runner_command(arguments())
+        self.assertEqual(runner[2], "session-run")
 
     def test_snapshot_reconnects_to_running_stream(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -84,6 +91,61 @@ class CastSessionTest(unittest.TestCase):
         self.assertEqual(snapshot["workspace"], "1")
         self.assertEqual(snapshot["video_frames"], 90)
 
+    def test_last_failure_ignores_cleanup_events(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime = pathlib.Path(temporary)
+            state_root = runtime / "hovencast"
+            state_root.mkdir()
+            (state_root / "session.events.jsonl").write_text(
+                "\n".join(
+                    json.dumps({"time": index, "event": event})
+                    for index, event in enumerate(
+                        ("startup-stalled", "process-stopped", "stopped"), start=1
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(runtime)}):
+                failure = _last_session_failure()
+
+        self.assertEqual(failure, "startup-stalled")
+
+    def test_snapshot_reports_connecting_during_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime = pathlib.Path(temporary)
+            state_root = runtime / "hovencast"
+            state_root.mkdir()
+            (state_root / "cast-session.json").write_text(
+                json.dumps(
+                    {
+                        "pid": os.getpid(),
+                        "start_ticks": process_start_ticks(os.getpid()),
+                        "started_at": 1,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (state_root / "session.events.jsonl").write_text(
+                "\n".join(
+                    json.dumps(record)
+                    for record in (
+                        {"time": 2, "event": "live-cast-requested"},
+                        {"time": 3, "event": "metrics", "video_frames": 60},
+                        {"time": 4, "event": "startup-stalled", "error": "stale"},
+                        {"time": 5, "event": "connection-recovery-started"},
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(runtime)}):
+                snapshot = cast_session_snapshot()
+
+        self.assertEqual(snapshot["state"], "connecting")
+        self.assertEqual(snapshot["video_frames"], 0)
+        self.assertEqual(snapshot["error"], "")
+
     @mock.patch("omarchy_cast.cast_session_snapshot", return_value={"running": True})
     @mock.patch("omarchy_cast.process_start_ticks", return_value=12345)
     @mock.patch("omarchy_cast.subprocess.Popen")
@@ -106,6 +168,31 @@ class CastSessionTest(unittest.TestCase):
         self.assertEqual(state["workspace"], "1")
         self.assertTrue(popen.call_args.kwargs["start_new_session"])
         self.assertTrue(popen.call_args.kwargs["close_fds"])
+        self.assertEqual(popen.call_args.args[0][2], "session-run")
+
+    @mock.patch("omarchy_cast.time.sleep")
+    @mock.patch("omarchy_cast.recover_capture_portal", return_value=True)
+    @mock.patch("omarchy_cast._last_session_failure", return_value="startup-stalled")
+    @mock.patch("omarchy_cast.subprocess.run")
+    def test_session_runner_retries_failed_startup(
+        self,
+        run: mock.Mock,
+        _last_event: mock.Mock,
+        recover: mock.Mock,
+        _sleep: mock.Mock,
+    ) -> None:
+        run.side_effect = [
+            subprocess.CompletedProcess([], 1),
+            subprocess.CompletedProcess([], 0),
+        ]
+
+        result = run_session_runner(arguments())
+
+        self.assertEqual(result, 0)
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(run.call_args_list[0].kwargs["env"]["HOVENCAST_ATTEMPT"], "1")
+        self.assertEqual(run.call_args_list[1].kwargs["env"]["HOVENCAST_ATTEMPT"], "2")
+        recover.assert_called_once_with(2)
 
 
 if __name__ == "__main__":

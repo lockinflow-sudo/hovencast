@@ -39,6 +39,8 @@ APP_ROOT = pathlib.Path(__file__).resolve().parents[1]
 APP_VERSION = json.loads(
     (APP_ROOT / "manifest.json").read_text(encoding="utf-8")
 )["version"]
+SESSION_MAX_ATTEMPTS = 3
+STARTUP_FRAME_DEADLINE_SECONDS = 8
 
 
 def runtime_root(required: bool = False) -> pathlib.Path | None:
@@ -606,6 +608,7 @@ class Recorder:
         self.counters = Counters()
         self.previous_bytes = 0
         self.output_stall_ticks = 0
+        self.startup_stall_ticks = 0
         self.previous_capture_frames = 0
         self.previous_video_frames = 0
         self.capture_stall_ticks = 0
@@ -1071,6 +1074,28 @@ class Recorder:
         output_was_started = (
             self.counters.video_frames > 0 and self.counters.audio_buffers > 0
         )
+        if self.counters.video_frames > 0:
+            self.startup_stall_ticks = 0
+        else:
+            self.startup_stall_ticks += 1
+            if self.startup_stall_ticks >= STARTUP_FRAME_DEADLINE_SECONDS:
+                self.exit_code = 1
+                emit(
+                    self.event_file,
+                    "startup-stalled",
+                    error="The display capture did not become responsive. Retrying the connection.",
+                    cause=(
+                        "portal-capture"
+                        if self.counters.capture_frames == 0
+                        else "video-encode"
+                    ),
+                    stall_seconds=self.startup_stall_ticks,
+                    capture_frames=self.counters.capture_frames,
+                    video_frames=self.counters.video_frames,
+                    audio_buffers=self.counters.audio_buffers,
+                )
+                self._stop("startup-stalled")
+                return GLib.SOURCE_REMOVE
         if output_was_started:
             if capture_is_live:
                 self.capture_stall_ticks = 0
@@ -1544,10 +1569,12 @@ def run_cast_live(args: argparse.Namespace) -> int:
                 )
                 return sender, [remux]
 
-            with event_path.open("w", encoding="utf-8") as event_file:
+            attempt = max(1, int(os.environ.get("HOVENCAST_ATTEMPT", "1") or 1))
+            with event_path.open("w" if attempt == 1 else "a", encoding="utf-8") as event_file:
                 emit(
                     event_file,
                     "live-cast-requested",
+                    attempt=attempt,
                     receiver=args.address,
                     duration_seconds=args.duration,
                     video_profile="high",
@@ -1587,6 +1614,20 @@ SESSION_FAILURE_EVENTS = {
     "pipeline-error",
     "transport-process-exited",
     "output-stalled",
+    "portal-closed",
+    "sender-exited",
+    "startup-stalled",
+}
+
+SESSION_RETRYABLE_EVENTS = {
+    "output-stalled",
+    "pipeline-error",
+    "portal-closed",
+    "portal-create-failed",
+    "portal-start-failed",
+    "sender-exited",
+    "startup-stalled",
+    "transport-process-exited",
 }
 
 
@@ -1629,6 +1670,15 @@ def cast_session_snapshot() -> dict[str, Any]:
     running = session_process_is_running(state)
     started_at = float(state.get("started_at", 0) or 0)
     records = read_cast_session_events(started_at)
+    latest_attempt = next(
+        (
+            index
+            for index in range(len(records) - 1, -1, -1)
+            if records[index].get("event") == "live-cast-requested"
+        ),
+        0,
+    )
+    records = records[latest_attempt:]
     metrics = next(
         (record for record in reversed(records) if record.get("event") == "metrics"),
         {},
@@ -1642,8 +1692,14 @@ def cast_session_snapshot() -> dict[str, Any]:
         {},
     )
     events = {str(record.get("event", "")) for record in records}
+    retrying = "connection-recovery-started" in events
+    if retrying:
+        metrics = {}
+        failure = {}
     if running:
-        if int(metrics.get("video_frames", 0) or 0) > 0 or "first-video" in events:
+        if retrying:
+            phase = "connecting"
+        elif int(metrics.get("video_frames", 0) or 0) > 0 or "first-video" in events:
             phase = "streaming"
         elif "portal-requested" in events and "portal-started" not in events:
             phase = "awaiting-portal"
@@ -1696,6 +1752,75 @@ def cast_live_command(args: argparse.Namespace) -> list[str]:
     return command
 
 
+def session_runner_command(args: argparse.Namespace) -> list[str]:
+    command = cast_live_command(args)
+    command[2] = "session-run"
+    return command
+
+
+def _append_session_event(event: str, **fields: Any) -> None:
+    with cast_session_path("session.events.jsonl").open("a", encoding="utf-8") as event_file:
+        emit(event_file, event, **fields)
+
+
+def _last_session_failure() -> str:
+    records = read_cast_session_events(0)
+    return next(
+        (
+            str(record.get("event", ""))
+            for record in reversed(records)
+            if record.get("event") in SESSION_RETRYABLE_EVENTS
+        ),
+        "",
+    )
+
+
+def recover_capture_portal(attempt: int) -> bool:
+    _append_session_event("connection-recovery-started", next_attempt=attempt)
+    try:
+        result = subprocess.run(
+            [
+                "systemctl",
+                "--user",
+                "restart",
+                "xdg-desktop-portal-hyprland.service",
+            ],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        _append_session_event(
+            "connection-recovery-failed", next_attempt=attempt, error=str(error)
+        )
+        return False
+    recovered = result.returncode == 0
+    _append_session_event(
+        "connection-recovery-completed",
+        next_attempt=attempt,
+        recovered=recovered,
+        error=result.stderr.strip() if not recovered else "",
+    )
+    return recovered
+
+
+def run_session_runner(args: argparse.Namespace) -> int:
+    for attempt in range(1, SESSION_MAX_ATTEMPTS + 1):
+        environment = dict(os.environ)
+        environment["HOVENCAST_ATTEMPT"] = str(attempt)
+        result = subprocess.run(cast_live_command(args), env=environment, check=False)
+        if result.returncode in {0, 130}:
+            return result.returncode
+        failure = _last_session_failure()
+        if attempt >= SESSION_MAX_ATTEMPTS or failure not in SESSION_RETRYABLE_EVENTS:
+            return result.returncode
+        recover_capture_portal(attempt + 1)
+        time.sleep(0.75)
+    return 1
+
+
 def run_session_start(args: argparse.Namespace) -> int:
     with cast_session_lock():
         existing = read_cast_session_state()
@@ -1707,7 +1832,7 @@ def run_session_start(args: argparse.Namespace) -> int:
         with log_path.open("w", encoding="utf-8") as log_file:
             log_path.chmod(0o600)
             process = subprocess.Popen(
-                cast_live_command(args),
+                session_runner_command(args),
                 stdin=subprocess.DEVNULL,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
@@ -1876,6 +2001,9 @@ def build_parser() -> argparse.ArgumentParser:
     cast_live = subparsers.add_parser("cast-live", help="share a portal-selected monitor live over WFD/MICE")
     add_cast_arguments(cast_live)
     cast_live.set_defaults(func=run_cast_live)
+    session_run = subparsers.add_parser("session-run", help=argparse.SUPPRESS)
+    add_cast_arguments(session_run)
+    session_run.set_defaults(func=run_session_runner)
     session_start = subparsers.add_parser(
         "session-start", help="start a detached wireless display session"
     )

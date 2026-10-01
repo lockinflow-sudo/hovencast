@@ -241,6 +241,7 @@ class VirtualWorkspace:
                 }
                 self._write_state(state)
                 self._switch_locked(workspace, local)
+                self._wait_output_ready(workspace, width, height)
                 return self._read_state()
             except Exception:
                 self._command(["hyprctl", "output", "remove", self.output], check=False)
@@ -249,6 +250,32 @@ class VirtualWorkspace:
 
     def _workspace(self, name: str) -> dict[str, Any] | None:
         return next((item for item in self.workspaces() if str(item.get("name")) == name), None)
+
+    def _wait_output_ready(
+        self,
+        workspace: str,
+        width: int,
+        height: int,
+        timeout_seconds: float = 2.0,
+    ) -> None:
+        """Wait until Hyprland has applied the output and workspace move."""
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            monitor = next(
+                (item for item in self.monitors() if item.get("name") == self.output),
+                None,
+            )
+            active = (monitor or {}).get("activeWorkspace") or {}
+            if (
+                str(active.get("name", "")) == workspace
+                and int((monitor or {}).get("width", 0) or 0) == width
+                and int((monitor or {}).get("height", 0) or 0) == height
+            ):
+                return
+            time.sleep(0.05)
+        raise RuntimeError(
+            f"Hyprland did not make workspace {workspace} ready on {self.output}"
+        )
 
     def _switch_locked(
         self, workspace: str, entry_focus: Focus | None = None

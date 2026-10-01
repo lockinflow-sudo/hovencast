@@ -75,6 +75,7 @@ class VirtualWorkspaceTest(unittest.TestCase):
             self.manager._write_state(state)
 
         self.manager._switch_locked = mock.Mock(side_effect=select)
+        self.manager._wait_output_ready = mock.Mock()
         state = self.manager.start(1280, 720, "4")
 
         self.assertEqual(
@@ -85,6 +86,33 @@ class VirtualWorkspaceTest(unittest.TestCase):
         self.assertIn('mode = "1280x720@60"', commands[1][2])
         self.assertIn('position = "1280x0"', commands[1][2])
         self.assertEqual(state["selected_workspace"], "4")
+        self.manager._wait_output_ready.assert_called_once_with("4", 1280, 720)
+
+    def test_output_ready_waits_for_selected_workspace_and_mode(self) -> None:
+        self.manager.monitors = mock.Mock(
+            side_effect=[
+                [
+                    {
+                        "name": "HovenCast-TV",
+                        "width": 1280,
+                        "height": 720,
+                        "activeWorkspace": {"name": "1"},
+                    }
+                ],
+                [
+                    {
+                        "name": "HovenCast-TV",
+                        "width": 1280,
+                        "height": 720,
+                        "activeWorkspace": {"name": "2"},
+                    }
+                ],
+            ]
+        )
+
+        self.manager._wait_output_ready("2", 1280, 720, timeout_seconds=0.2)
+
+        self.assertEqual(self.manager.monitors.call_count, 2)
 
     def test_switch_moves_an_active_laptop_workspace_after_showing_fallback(self) -> None:
         self.write_state()

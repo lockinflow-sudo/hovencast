@@ -22,6 +22,7 @@ typedef enum {
 static GMainLoop *main_loop;
 static gboolean receiver_streaming;
 static GInetAddress *expected_receiver_address;
+static int exit_status;
 
 #define TYPE_OMARCHY_WFD_CLIENT (omarchy_wfd_client_get_type())
 G_DECLARE_FINAL_TYPE(OmarchyWfdClient, omarchy_wfd_client, OMARCHY, WFD_CLIENT, GstRTSPClient)
@@ -520,6 +521,7 @@ static gboolean receiver_start_timeout(gpointer data) {
   (void)data;
   if (!receiver_streaming) {
     event("receiver-state", "connection-timeout");
+    exit_status = 1;
     if (main_loop)
       g_main_loop_quit(main_loop);
   }
@@ -614,5 +616,5 @@ int main(int argc, char **argv) {
   g_main_loop_unref(main_loop);
   main_loop = NULL;
   g_clear_object(&expected_receiver_address);
-  return 0;
+  return exit_status;
 }
