@@ -1306,49 +1306,118 @@ Panel {
             foreground: root.foreground
           }
 
-          Item {
+          RowLayout {
             width: parent.width
-            implicitHeight: Math.max(audioLabels.implicitHeight, audioSwitch.implicitHeight)
+            spacing: Style.space(8)
 
-            Column {
-              id: audioLabels
-              anchors.left: parent.left
-              anchors.right: audioSwitch.left
-              anchors.rightMargin: Style.space(12)
-              anchors.verticalCenter: parent.verticalCenter
-              spacing: Style.space(2)
+            CastSurface {
+              Layout.fillWidth: true
+              implicitHeight: Style.space(58)
+              bordered: true
+              foreground: root.foreground
 
-              Text {
-                width: parent.width
-                text: "Keep audio on this computer"
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-                elide: Text.ElideRight
+              Column {
+                anchors.left: parent.left
+                anchors.right: audioSwitch.left
+                anchors.leftMargin: Style.space(12)
+                anchors.rightMargin: Style.space(10)
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(2)
+
+                Text {
+                  width: parent.width
+                  text: "Keep audio here"
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  font.bold: true
+                  elide: Text.ElideRight
+                }
+
+                Text {
+                  width: parent.width
+                  text: root.keepLocalAudio ? "Computer + TV" : "Follows its window"
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  elide: Text.ElideRight
+                }
               }
 
-              Text {
-                width: parent.width
-                text: root.keepLocalAudio
-                  ? "Audio plays here and on the TV"
-                  : (root.sourceMode === "workspace"
-                    ? "Audio follows its window between displays"
-                    : "Audio moves to the TV while sharing")
-                color: root.dim
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                elide: Text.ElideRight
+              ToggleSwitch {
+                id: audioSwitch
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(10)
+                anchors.verticalCenter: parent.verticalCenter
+                checked: root.keepLocalAudio
+                enabled: !root.sessionActive
+                foreground: root.foreground
+                onToggled: root.persistAudioPreference(!root.keepLocalAudio)
               }
             }
 
-            ToggleSwitch {
-              id: audioSwitch
-              anchors.right: parent.right
-              anchors.verticalCenter: parent.verticalCenter
-              checked: root.keepLocalAudio
-              enabled: !root.sessionActive
+            CastSurface {
+              id: compactPlacementButton
+              visible: root.sourceMode === "workspace"
+              Layout.fillWidth: true
+              implicitHeight: Style.space(58)
+              bordered: true
               foreground: root.foreground
-              onToggled: root.persistAudioPreference(!root.keepLocalAudio)
+              accent: root.urgent
+
+              Column {
+                anchors.left: parent.left
+                anchors.right: placementCaret.left
+                anchors.leftMargin: Style.space(12)
+                anchors.rightMargin: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(2)
+
+                Text {
+                  width: parent.width
+                  text: "TV placement"
+                  color: root.sessionActive ? root.dim : root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  font.bold: true
+                  elide: Text.ElideRight
+                }
+
+                Text {
+                  width: parent.width
+                  text: root.displayPlacementLabel(root.displayPlacement)
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  elide: Text.ElideRight
+                }
+              }
+
+              Text {
+                id: placementCaret
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(12)
+                anchors.verticalCenter: parent.verticalCenter
+                text: "▾"
+                color: root.sessionActive ? root.dim : root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              MouseArea {
+                id: compactPlacementMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: root.sessionActive ? Qt.ArrowCursor : Qt.PointingHandCursor
+                enabled: !root.sessionActive
+                onClicked: root.displayPlacementMenuOpen = !root.displayPlacementMenuOpen
+              }
+
+              PanelToolTip {
+                visible: compactPlacementMouse.containsMouse
+                text: "Display Placement"
+                fontFamily: root.fontFamily
+              }
             }
           }
 
@@ -1417,56 +1486,17 @@ Panel {
             }
           }
 
-          RowLayout {
+          Text {
             width: parent.width
-            spacing: Style.space(10)
-
-            Text {
-              Layout.fillWidth: true
-              text: root.sourceMode === "workspace"
-                ? (root.sessionState === "streaming"
-                  ? "Choose another workspace without reconnecting the TV."
-                  : "Put a workspace on a dedicated wireless display.")
-                : "Share a workspace, application window, or selected area."
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              wrapMode: Text.WordWrap
-            }
-
-            CastSurface {
-              id: placementButton
-              visible: root.sourceMode === "workspace"
-              Layout.preferredWidth: Style.space(116)
-              implicitHeight: Style.space(32)
-              bordered: true
-              foreground: root.foreground
-              accent: root.urgent
-
-              Text {
-                anchors.centerIn: parent
-                text: "TV:  " + root.displayPlacementLabel(root.displayPlacement) + "  ▾"
-                color: root.sessionActive ? root.dim : root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
-              }
-
-              MouseArea {
-                id: placementMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: root.sessionActive ? Qt.ArrowCursor : Qt.PointingHandCursor
-                enabled: !root.sessionActive
-                onClicked: root.displayPlacementMenuOpen = !root.displayPlacementMenuOpen
-              }
-
-              PanelToolTip {
-                visible: placementMouse.containsMouse
-                text: "Display Placement"
-                fontFamily: root.fontFamily
-              }
-            }
+            text: root.sourceMode === "workspace"
+              ? (root.sessionState === "streaming"
+                ? "Choose another workspace without reconnecting the TV."
+                : "Put a workspace on a dedicated wireless display.")
+              : "Share a workspace, application window, or selected area."
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
           }
 
           RowLayout {
