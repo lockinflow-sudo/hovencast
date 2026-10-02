@@ -40,15 +40,24 @@ if [[ -f "$auto_selection_file" ]]; then
   rm -f -- "$auto_selection_file"
   auto_pid="$(jq -r '.pid // 0' <<<"$auto_selection" 2>/dev/null || printf '0')"
   auto_output="$(jq -r '.output // empty' <<<"$auto_selection" 2>/dev/null || true)"
+  auto_source="$(jq -r '.selection // empty' <<<"$auto_selection" 2>/dev/null || true)"
   auto_metadata="$(jq -c '.metadata // {}' <<<"$auto_selection" 2>/dev/null || true)"
+  [[ -n "$auto_source" ]] || auto_source="screen:$auto_output"
+  source_valid=0
+  if [[ "$auto_source" == "screen:$auto_output" ]]; then
+    source_valid=1
+  elif [[ "$auto_source" =~ ^region:${auto_output}@-?[0-9]+,-?[0-9]+,[0-9]+,[0-9]+$ ]]; then
+    source_valid=1
+  fi
   if [[ "$auto_pid" =~ ^[0-9]+$ ]] && kill -0 "$auto_pid" 2>/dev/null \
     && [[ -n "$auto_output" ]] \
+    && (( source_valid )) \
     && hyprctl -j monitors all 2>/dev/null | jq -e --arg output "$auto_output" \
       '.[] | select(.name == $output)' >/dev/null; then
     printf '%s\n' "$auto_metadata" >"$selection_file.tmp"
     mv -f "$selection_file.tmp" "$selection_file"
     selection_committed=1
-    printf '[SELECTION]%s/screen:%s\n' "$allow_token" "$auto_output"
+    printf '[SELECTION]%s/%s\n' "$allow_token" "$auto_source"
     exit 0
   fi
 fi

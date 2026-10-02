@@ -32,6 +32,12 @@ def arguments(**overrides: object) -> argparse.Namespace:
         "duration": 0,
         "quality": "720p",
         "workspace": "1",
+        "source_kind": "",
+        "source_output": "",
+        "source_region": "",
+        "source_window_address": "",
+        "source_window_class": "",
+        "source_window_title": "",
         "placement": "above",
         "keep_local_audio": False,
         "ipc_target": "hoven.cast",
@@ -51,6 +57,25 @@ class CastSessionTest(unittest.TestCase):
 
         runner = session_runner_command(arguments())
         self.assertEqual(runner[2], "session-run")
+
+    def test_command_preserves_preselected_window(self) -> None:
+        command = cast_live_command(
+            arguments(
+                workspace="",
+                source_kind="window",
+                source_output="eDP-1",
+                source_window_address="0x1234",
+                source_window_class="chatgpt",
+                source_window_title="HovenCast frontend chat",
+            )
+        )
+
+        self.assertEqual(command[command.index("--source-kind") + 1], "window")
+        self.assertEqual(command[command.index("--source-output") + 1], "eDP-1")
+        self.assertEqual(
+            command[command.index("--source-window-address") + 1], "0x1234"
+        )
+        self.assertNotIn("--workspace", command)
 
     def test_snapshot_reconnects_to_running_stream(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

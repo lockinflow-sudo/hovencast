@@ -38,6 +38,24 @@ assert.equal(windows.length, 2)
 assert.equal(windows[0].handle, "42")
 assert.equal(windows[0].title, "Video")
 assert.equal(windows[1].appClass, "chatgpt")
+
+const shareSources = model.parseShareSources(JSON.stringify({
+  output: "eDP-1",
+  description: "Built-in display",
+  width: 1920,
+  height: 1200,
+  preview: "/tmp/preview.png",
+  windows: [{
+    handle: "0x1234",
+    address: "0x1234",
+    appClass: "chatgpt",
+    title: "HovenCast frontend chat",
+    output: "eDP-1"
+  }]
+}))
+assert.equal(shareSources.output, "eDP-1")
+assert.equal(shareSources.windows.length, 1)
+assert.equal(shareSources.windows[0].title, "HovenCast frontend chat")
 assert.equal(model.displayName("eDP-1", "BOE panel"), "Built-in display")
 assert.equal(model.displayName("HDMI-A-1", "Living Room Display"), "Living Room Display")
 assert.equal(model.protocolLabel("miracast-mice"), "MIRACAST · LOCAL NETWORK")

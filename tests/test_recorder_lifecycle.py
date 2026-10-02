@@ -21,6 +21,7 @@ from omarchy_cast import (  # noqa: E402
     Counters,
     Recorder,
     SilentAudioRoute,
+    arm_source_picker,
     picker_source_info,
     recover_orphan_audio_route,
     window_crop_geometry,
@@ -143,6 +144,53 @@ class RecorderLifecycleTest(unittest.TestCase):
                 metadata = picker_source_info()
             self.assertEqual(metadata["kind"], "workspace")
             self.assertEqual(metadata["workspace"], "4")
+
+    def test_picker_automatically_selects_preplanned_region(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            runtime = root / "runtime"
+            fake_bin = root / "bin"
+            runtime.mkdir()
+            fake_bin.mkdir()
+            hyprctl = fake_bin / "hyprctl"
+            hyprctl.write_text(
+                "#!/bin/bash\nprintf '%s\\n' '[{\"name\":\"eDP-1\"}]'\n",
+                encoding="utf-8",
+            )
+            hyprctl.chmod(0o755)
+            environment = {
+                "PATH": f"{fake_bin}:/usr/bin",
+                "XDG_RUNTIME_DIR": str(runtime),
+            }
+            args = type(
+                "Args",
+                (),
+                {
+                    "source_kind": "region",
+                    "source_output": "eDP-1",
+                    "source_region": "eDP-1@10,20,640,360",
+                    "source_window_address": "",
+                    "source_window_class": "",
+                    "source_window_title": "",
+                },
+            )()
+            with mock.patch.dict(os.environ, environment, clear=True):
+                arm_source_picker(args)
+                result = subprocess.run(
+                    [str(PICKER)],
+                    env=environment,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=True,
+                )
+                metadata = picker_source_info()
+
+            self.assertEqual(
+                result.stdout.strip(), "[SELECTION]/region:eDP-1@10,20,640,360"
+            )
+            self.assertEqual(metadata["kind"], "region")
+            self.assertEqual(metadata["region"], "eDP-1@10,20,640,360")
 
     def test_picker_metadata_survives_exit_until_backend_consumes_it(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

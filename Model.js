@@ -95,6 +95,43 @@ function parsePickerWindowList(raw) {
   return result
 }
 
+function parseShareSources(raw) {
+  var result = {
+    output: "",
+    description: "",
+    width: 0,
+    height: 0,
+    preview: "",
+    windows: [],
+    error: ""
+  }
+  try {
+    var parsed = JSON.parse(String(raw || "{}"))
+    result.output = String(parsed.output || "")
+    result.description = String(parsed.description || "")
+    result.width = Number(parsed.width || 0)
+    result.height = Number(parsed.height || 0)
+    result.preview = String(parsed.preview || "")
+    var windows = Array.isArray(parsed.windows) ? parsed.windows : []
+    for (var i = 0; i < windows.length; i++) {
+      var window = windows[i] || {}
+      var address = String(window.address || "").trim()
+      if (address === "") continue
+      result.windows.push({
+        handle: String(window.handle || address),
+        address: address,
+        appClass: String(window.appClass || "Application"),
+        title: String(window.title || window.appClass || "Application window"),
+        output: String(window.output || result.output)
+      })
+    }
+    if (result.output === "") result.error = "The active display is unavailable."
+  } catch (error) {
+    result.error = "Share sources could not be loaded."
+  }
+  return result
+}
+
 function displayName(output, description) {
   var name = String(output || "")
   if (/^(eDP|LVDS|DSI)-/i.test(name)) return "Built-in display"
@@ -161,6 +198,7 @@ if (typeof module !== "undefined") {
     parseEvent: parseEvent,
     parseWorkspaces: parseWorkspaces,
     parsePickerWindowList: parsePickerWindowList,
+    parseShareSources: parseShareSources,
     displayName: displayName,
     protocolLabel: protocolLabel,
     protocolName: protocolName,

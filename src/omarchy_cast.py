@@ -136,6 +136,55 @@ def arm_picker_target(ipc_target: str) -> pathlib.Path:
     return target
 
 
+def arm_source_picker(args: argparse.Namespace) -> pathlib.Path:
+    source_kind = str(getattr(args, "source_kind", "") or "").strip()
+    source_output = str(getattr(args, "source_output", "") or "").strip()
+    if source_kind not in {"screen", "window", "region"}:
+        raise RuntimeError("invalid HovenCast share source")
+    if not source_output:
+        raise RuntimeError("the selected display is unavailable")
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR", "").strip()
+    if not runtime_dir:
+        raise RuntimeError("HovenCast requires XDG_RUNTIME_DIR")
+    picker_root = pathlib.Path(runtime_dir) / "hovencast-picker"
+    picker_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    picker_root.chmod(0o700)
+    target = picker_root / "auto-selection.json"
+    temporary = target.with_name(f".{target.name}.{os.getpid()}")
+    metadata: dict[str, Any] = {
+        "kind": source_kind,
+        "output": source_output,
+    }
+    selection = f"screen:{source_output}"
+    if source_kind == "window":
+        window_address = str(getattr(args, "source_window_address", "") or "").strip()
+        if not window_address:
+            raise RuntimeError("the selected window is unavailable")
+        metadata.update(
+            {
+                "windowAddress": window_address,
+                "windowClass": str(getattr(args, "source_window_class", "") or ""),
+                "windowTitle": str(getattr(args, "source_window_title", "") or ""),
+            }
+        )
+    elif source_kind == "region":
+        region = str(getattr(args, "source_region", "") or "").strip()
+        if not region:
+            raise RuntimeError("the selected area is unavailable")
+        selection = f"region:{region}"
+        metadata["region"] = region
+    payload = {
+        "pid": os.getpid(),
+        "output": source_output,
+        "selection": selection,
+        "metadata": metadata,
+    }
+    temporary.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.chmod(0o600)
+    os.replace(temporary, target)
+    return target
+
+
 def process_is_running(pid: int) -> bool:
     if pid <= 0:
         return False
@@ -1429,6 +1478,92 @@ def run_discover(_args: argparse.Namespace) -> int:
     return 0
 
 
+def run_source_list(_args: argparse.Namespace) -> int:
+    monitors_result = subprocess.run(
+        ["hyprctl", "-j", "monitors"],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+    )
+    clients_result = subprocess.run(
+        ["hyprctl", "-j", "clients"],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+    )
+    monitors = json.loads(monitors_result.stdout)
+    clients = json.loads(clients_result.stdout)
+    if not isinstance(monitors, list) or not monitors:
+        raise RuntimeError("No local display is available to share.")
+    focused = next((item for item in monitors if item.get("focused")), monitors[0])
+    output = str(focused.get("name", ""))
+    if not output:
+        raise RuntimeError("The active display is unavailable.")
+    monitor_names = {
+        int(item.get("id", -1)): str(item.get("name", ""))
+        for item in monitors
+        if str(item.get("name", ""))
+    }
+    windows = []
+    if isinstance(clients, list):
+        for client in clients:
+            address = str(client.get("address", "")).strip()
+            if not address or not bool(client.get("mapped", True)):
+                continue
+            app_class = str(client.get("class", "") or client.get("initialClass", ""))
+            title = str(client.get("title", "") or client.get("initialTitle", ""))
+            windows.append(
+                {
+                    "handle": address,
+                    "address": address,
+                    "appClass": app_class,
+                    "title": title or app_class or "Application window",
+                    "output": monitor_names.get(int(client.get("monitor", -1)), output),
+                }
+            )
+    source_root = runtime_root(required=True)
+    assert source_root is not None
+    preview = source_root / "share-source-preview.png"
+    preview.unlink(missing_ok=True)
+    result = subprocess.run(
+        ["grim", "-o", output, "-s", "0.25", str(preview)],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    print(
+        json.dumps(
+            {
+                "output": output,
+                "description": str(focused.get("description", "")),
+                "width": int(focused.get("width", 0) or 0),
+                "height": int(focused.get("height", 0) or 0),
+                "preview": str(preview) if result.returncode == 0 else "",
+                "windows": windows,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def run_source_region(_args: argparse.Namespace) -> int:
+    result = subprocess.run(
+        ["slurp", "-f", "%o@%x,%y,%w,%h"],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    region = result.stdout.strip()
+    if result.returncode != 0 or not region or "@" not in region:
+        print(json.dumps({"region": "", "cancelled": True}, sort_keys=True))
+        return 0
+    output = region.split("@", 1)[0]
+    print(json.dumps({"region": region, "output": output}, sort_keys=True))
+    return 0
+
+
 def run_mice_probe(args: argparse.Namespace) -> int:
     messages = probe_wfd_capabilities(args.address, args.name, timeout=args.timeout)
     transcript = []
@@ -1481,6 +1616,7 @@ def run_cast_live(args: argparse.Namespace) -> int:
     virtual_workspace: VirtualWorkspace | None = None
     guard_process: subprocess.Popen[bytes] | None = None
     picker_target_request: pathlib.Path | None = None
+    source_picker_request: pathlib.Path | None = None
     if args.workspace:
         virtual_workspace = VirtualWorkspace()
         state = virtual_workspace.start(
@@ -1522,6 +1658,8 @@ def run_cast_live(args: argparse.Namespace) -> int:
             ),
             flush=True,
         )
+    elif getattr(args, "source_kind", ""):
+        source_picker_request = arm_source_picker(args)
     try:
         if args.ipc_target:
             picker_target_request = arm_picker_target(args.ipc_target)
@@ -1605,6 +1743,8 @@ def run_cast_live(args: argparse.Namespace) -> int:
     finally:
         if picker_target_request:
             picker_target_request.unlink(missing_ok=True)
+        if source_picker_request:
+            source_picker_request.unlink(missing_ok=True)
         if virtual_workspace:
             virtual_workspace.stop()
         if guard_process and guard_process.poll() is None:
@@ -1725,6 +1865,7 @@ def cast_session_snapshot() -> dict[str, Any]:
         "address": str(state.get("address", "")),
         "receiver": str(state.get("receiver", "")),
         "workspace": str(state.get("workspace", "")),
+        "source_kind": str(state.get("source_kind", "")),
         "placement": str(state.get("placement", "right")),
         "video_frames": int(metrics.get("video_frames", 0) or 0),
         "audio_buffers": int(metrics.get("audio_buffers", 0) or 0),
@@ -1753,6 +1894,17 @@ def cast_live_command(args: argparse.Namespace) -> list[str]:
     if args.workspace:
         command.extend(["--workspace", args.workspace])
         command.extend(["--placement", args.placement])
+    elif getattr(args, "source_kind", ""):
+        command.extend(["--source-kind", args.source_kind])
+        command.extend(["--source-output", args.source_output])
+        if args.source_kind == "window":
+            command.extend(["--source-window-address", args.source_window_address])
+            if args.source_window_class:
+                command.extend(["--source-window-class", args.source_window_class])
+            if args.source_window_title:
+                command.extend(["--source-window-title", args.source_window_title])
+        elif args.source_kind == "region":
+            command.extend(["--source-region", args.source_region])
     if args.keep_local_audio:
         command.append("--keep-local-audio")
     if args.ipc_target:
@@ -1858,6 +2010,9 @@ def run_session_start(args: argparse.Namespace) -> int:
             "address": args.address,
             "receiver": args.receiver_name or args.address,
             "workspace": args.workspace or "",
+            "source_kind": getattr(args, "source_kind", "") or (
+                "workspace" if args.workspace else ""
+            ),
             "placement": args.placement,
             "stop_requested": False,
         }
@@ -1992,6 +2147,17 @@ def add_cast_arguments(parser: argparse.ArgumentParser, *, detached: bool = Fals
         help="capture this workspace on a dedicated virtual output",
     )
     parser.add_argument(
+        "--source-kind",
+        choices=("screen", "window", "region"),
+        default="",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument("--source-output", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--source-region", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--source-window-address", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--source-window-class", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--source-window-title", default="", help=argparse.SUPPRESS)
+    parser.add_argument(
         "--placement",
         choices=("left", "above", "below", "right"),
         default="right",
@@ -2013,6 +2179,10 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     discover = subparsers.add_parser("discover", help="discover Miracast-over-LAN receivers")
     discover.set_defaults(func=run_discover)
+    source_list = subparsers.add_parser("source-list", help=argparse.SUPPRESS)
+    source_list.set_defaults(func=run_source_list)
+    source_region = subparsers.add_parser("source-region", help=argparse.SUPPRESS)
+    source_region.set_defaults(func=run_source_region)
     cast_live = subparsers.add_parser("cast-live", help="share a portal-selected monitor live over WFD/MICE")
     add_cast_arguments(cast_live)
     cast_live.set_defaults(func=run_cast_live)

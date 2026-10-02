@@ -31,6 +31,7 @@ Panel {
   property int bitrateBps: 0
   property real avDriftMs: 0
   property bool sourcePickerVisible: false
+  property bool sourcePickerPlanning: false
   property string sourcePickerResult: "idle"
   property string sourcePickerPage: "ready"
   property string sourceOutput: ""
@@ -42,6 +43,8 @@ Panel {
   property var sourceWindows: []
   property string sourceSelection: "screen"
   property string sourceSelectedWindowHandle: ""
+  property string sourceRegion: ""
+  property string sourceError: ""
   property int sourceCursor: 3
   property int sourceWindowIndex: 0
   property string sourceMode: "workspace"
@@ -115,6 +118,46 @@ Panel {
     workspaceListProc.running = true
   }
 
+  function refreshShareSources() {
+    if (sourceListProc.running || sessionActive) return
+    sourceError = ""
+    sourceListProc.command = [backendCommand, "source-list"]
+    sourceListProc.running = true
+  }
+
+  function chooseDesktopSource() {
+    if (sourceOutput === "") {
+      sourceError = "The desktop preview is still loading."
+      refreshShareSources()
+      return
+    }
+    sourceSelection = "screen"
+    sourceSelectedWindowHandle = ""
+    sourceRegion = ""
+  }
+
+  function showWindowSourcePicker() {
+    if (sourceWindows.length === 0) {
+      sourceError = "No shareable application windows are open."
+      refreshShareSources()
+      return
+    }
+    sourceError = ""
+    sourcePickerPlanning = true
+    sourcePickerResult = "idle"
+    sourcePickerPage = "windows"
+    sourcePickerVisible = true
+    sourceWindowIndex = Math.max(0, Math.min(sourceWindowIndex, sourceWindows.length - 1))
+  }
+
+  function chooseAreaSource() {
+    if (sourceRegionProc.running || sessionActive) return
+    sourceError = ""
+    sourceRegionProc.command = [backendCommand, "source-region"]
+    sourceRegionProc.running = true
+    root.close()
+  }
+
   function selectedWorkspaceName() {
     if (selectedWorkspaceIndex < 0 || selectedWorkspaceIndex >= availableWorkspaces.length)
       return ""
@@ -168,6 +211,33 @@ Panel {
       activeWorkspaceName = workspace
       command.push("--workspace", workspace)
       command.push("--placement", normalizedDisplayPlacement(displayPlacement))
+    } else {
+      if (sourceOutput === "") {
+        lastError = "Choose what to share before connecting."
+        sessionState = "error"
+        return
+      }
+      command.push("--source-kind", sourceSelection)
+      command.push("--source-output", sourceOutput)
+      if (sourceSelection === "window") {
+        if (sourceSelectedWindowHandle === ""
+            || sourceWindowIndex < 0 || sourceWindowIndex >= sourceWindows.length) {
+          lastError = "Choose an application window before connecting."
+          sessionState = "error"
+          return
+        }
+        var selectedWindow = sourceWindows[sourceWindowIndex] || {}
+        command.push("--source-window-address", String(selectedWindow.address || ""))
+        command.push("--source-window-class", String(selectedWindow.appClass || ""))
+        command.push("--source-window-title", String(selectedWindow.title || ""))
+      } else if (sourceSelection === "region") {
+        if (sourceRegion === "") {
+          lastError = "Select an area before connecting."
+          sessionState = "error"
+          return
+        }
+        command.push("--source-region", sourceRegion)
+      }
     }
     if (keepLocalAudio) command.push("--keep-local-audio")
     castProc.command = command
@@ -205,10 +275,13 @@ Panel {
     if (Boolean(status.running)) {
       activeAddress = String(status.address || activeAddress)
       activeName = String(status.receiver || activeName || activeAddress)
-      activeWorkspaceName = String(status.workspace || activeWorkspaceName)
+      activeWorkspaceName = String(status.workspace || "")
       if (activeWorkspaceName !== "") {
         sourceMode = "workspace"
         displayPlacement = normalizedDisplayPlacement(status.placement || displayPlacement)
+      } else if (String(status.source_kind || "") !== "") {
+        sourceMode = "window"
+        sourceSelection = String(status.source_kind)
       }
       videoFrames = Number(status.video_frames || 0)
       audioBuffers = Number(status.audio_buffers || 0)
@@ -233,6 +306,7 @@ Panel {
   }
 
   function openSourcePicker(output, description, width, height, previewPath, windowsB64) {
+    sourcePickerPlanning = false
     sourceOutput = String(output || "")
     sourceDescription = String(description || "")
     sourceWidth = Number(width || 0)
@@ -260,6 +334,12 @@ Panel {
 
   function cancelSourcePicker() {
     if (!sourcePickerVisible) return
+    if (sourcePickerPlanning) {
+      sourcePickerPlanning = false
+      sourcePickerVisible = false
+      sourcePickerPage = "ready"
+      return
+    }
     sourcePickerResult = "cancel"
     sourcePickerVisible = false
     sourcePickerPage = "ready"
@@ -268,6 +348,12 @@ Panel {
   }
 
   function closeSourceView() {
+    if (sourcePickerPlanning) {
+      sourcePickerPlanning = false
+      sourcePickerVisible = false
+      sourcePickerPage = "ready"
+      return
+    }
     if (sourcePickerPage === "windows") {
       sourcePickerPage = "ready"
       sourceCursor = 1
@@ -292,6 +378,14 @@ Panel {
     sourceSelectedWindowHandle = String(sourceWindows[index].handle || "")
     if (sourceSelectedWindowHandle === "") return
     sourceSelection = "window"
+    sourceRegion = ""
+    sourceOutput = String(sourceWindows[index].output || sourceOutput)
+    if (sourcePickerPlanning) {
+      sourcePickerPlanning = false
+      sourcePickerVisible = false
+      sourcePickerPage = "ready"
+      return
+    }
     finishSourcePicker("window:" + sourceSelectedWindowHandle)
   }
 
@@ -435,10 +529,12 @@ Panel {
 
   onOpenedChanged: {
     if (!opened) displayPlacementMenuOpen = false
-    if (!opened && sourcePickerVisible && sourcePickerResult === "pending") cancelSourcePicker()
+    if (!opened && sourcePickerVisible
+        && (sourcePickerPlanning || sourcePickerResult === "pending")) cancelSourcePicker()
     if (opened && !sessionActive) refresh()
     if (opened) cursorActive = false
     if (opened) refreshWorkspaces()
+    if (opened && sourceMode === "window") refreshShareSources()
   }
 
   Timer {
@@ -522,6 +618,84 @@ Panel {
         root.workspaceError = String(workspaceActionStderr.text || "").trim()
           || "Could not control the TV workspace."
       root.refreshWorkspaces()
+    }
+  }
+
+  Process {
+    id: sourceListProc
+    stdout: StdioCollector {
+      id: sourceListStdout
+      waitForEnd: true
+      onStreamFinished: {
+        var result = Model.parseShareSources(text)
+        root.sourceDescription = result.description
+        root.sourceWidth = result.width
+        root.sourceHeight = result.height
+        root.sourcePreviewPath = result.preview
+        root.sourcePreviewNonce += 1
+        root.sourceWindows = result.windows
+        root.sourceError = result.error
+        if (root.sourceSelection === "window" && root.sourceSelectedWindowHandle !== "") {
+          var selectedIndex = -1
+          for (var i = 0; i < result.windows.length; i++) {
+            if (String(result.windows[i].handle) === root.sourceSelectedWindowHandle) {
+              selectedIndex = i
+              break
+            }
+          }
+          if (selectedIndex >= 0) {
+            root.sourceWindowIndex = selectedIndex
+            root.sourceOutput = String(result.windows[selectedIndex].output || result.output)
+          } else {
+            root.sourceSelection = "screen"
+            root.sourceSelectedWindowHandle = ""
+            root.sourceOutput = result.output
+          }
+        } else if (root.sourceSelection !== "region") {
+          root.sourceOutput = result.output
+        }
+      }
+    }
+    stderr: StdioCollector {
+      id: sourceListStderr
+      waitForEnd: true
+    }
+    onExited: function(exitCode, exitStatus) {
+      if (exitCode !== 0)
+        root.sourceError = String(sourceListStderr.text || "").trim()
+          || "Share sources could not be loaded."
+    }
+  }
+
+  Process {
+    id: sourceRegionProc
+    stdout: StdioCollector {
+      id: sourceRegionStdout
+      waitForEnd: true
+      onStreamFinished: {
+        try {
+          var result = JSON.parse(String(text || "{}"))
+          var region = String(result.region || "")
+          if (region !== "") {
+            root.sourceSelection = "region"
+            root.sourceRegion = region
+            root.sourceOutput = String(result.output || region.split("@")[0] || "")
+            root.sourceSelectedWindowHandle = ""
+          }
+        } catch (error) {
+          root.sourceError = "The selected area could not be read."
+        }
+      }
+    }
+    stderr: StdioCollector {
+      id: sourceRegionStderr
+      waitForEnd: true
+    }
+    onExited: function(exitCode, exitStatus) {
+      if (exitCode !== 0)
+        root.sourceError = String(sourceRegionStderr.text || "").trim()
+          || "The area selector could not start."
+      root.open()
     }
   }
 
@@ -1120,7 +1294,9 @@ Panel {
               visible: root.sourcePickerPage === "windows"
               width: parent.width
               text: root.sourceWindows.length > 0
-                ? "Choose the application window you want to show. Sharing starts when you select it."
+                ? (root.sourcePickerPlanning
+                  ? "Choose the application window you want to share, then select a wireless display."
+                  : "Choose the application window you want to show. Sharing starts when you select it.")
                 : "No shareable application windows are open."
               color: root.dim
               font.family: root.fontFamily
@@ -1244,7 +1420,7 @@ Panel {
 
               Text {
                 anchors.centerIn: parent
-                text: "Back to display"
+                text: root.sourcePickerPlanning ? "Back to Share Screen" : "Back to display"
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
@@ -1517,6 +1693,7 @@ Panel {
                 onTapped: {
                   root.sourceMode = "window"
                   root.displayPlacementMenuOpen = false
+                  root.refreshShareSources()
                 }
               }
             }
@@ -1528,7 +1705,7 @@ Panel {
               ? (root.sessionState === "streaming"
                 ? "Choose another workspace without reconnecting the TV."
                 : "Put a workspace on a dedicated wireless display.")
-              : "Share a workspace, application window, or selected area."
+              : "Choose what to share, then select a wireless display."
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -1595,6 +1772,172 @@ Panel {
                 }
               }
             }
+          }
+
+          Flow {
+            visible: root.sourceMode === "window"
+            width: parent.width
+            spacing: Style.space(10)
+
+            CastSurface {
+              id: desktopSourceChoice
+              width: Math.floor((receiverContent.width - Style.space(30)) / 4)
+              implicitHeight: Style.space(76)
+              current: root.sourceSelection === "screen"
+              bordered: true
+              foreground: root.foreground
+              accent: root.urgent
+              borderSpec: current ? Border.flat(root.urgent, 2)
+                : Border.controlSpec("normal", foreground, accent)
+
+              WorkspacePreview {
+                anchors.fill: parent
+                anchors.topMargin: Border.top(desktopSourceChoice.borderSpec)
+                anchors.rightMargin: Border.right(desktopSourceChoice.borderSpec)
+                anchors.bottomMargin: Border.bottom(desktopSourceChoice.borderSpec)
+                anchors.leftMargin: Border.left(desktopSourceChoice.borderSpec)
+                workspaceName: root.selectedWorkspaceIndex >= 0
+                  && root.selectedWorkspaceIndex < root.availableWorkspaces.length
+                  ? String(root.availableWorkspaces[root.selectedWorkspaceIndex].name || "") : ""
+                live: root.opened && root.sourceMode === "window"
+              }
+
+              Rectangle {
+                anchors.left: parent.left
+                anchors.bottom: parent.bottom
+                anchors.leftMargin: Style.space(8)
+                anchors.bottomMargin: Style.space(8)
+                implicitWidth: desktopSourceLabel.implicitWidth + Style.space(10)
+                implicitHeight: desktopSourceLabel.implicitHeight + Style.space(5)
+                color: Color.popups.background
+                border.width: 1
+                border.color: desktopSourceChoice.current
+                  ? root.urgent : Qt.alpha(root.foreground, 0.55)
+
+                Text {
+                  id: desktopSourceLabel
+                  anchors.centerIn: parent
+                  text: "Desktop"
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: desktopSourceChoice.current
+                }
+              }
+
+              TapHandler { onTapped: root.chooseDesktopSource() }
+            }
+
+            CastSurface {
+              id: windowSourceChoice
+              width: Math.floor((receiverContent.width - Style.space(30)) / 4)
+              implicitHeight: Style.space(76)
+              current: root.sourceSelection === "window"
+              bordered: true
+              foreground: root.foreground
+              accent: root.urgent
+              borderSpec: current ? Border.flat(root.urgent, 2)
+                : Border.controlSpec("normal", foreground, accent)
+
+              WindowPreview {
+                anchors.fill: parent
+                anchors.topMargin: Border.top(windowSourceChoice.borderSpec)
+                anchors.rightMargin: Border.right(windowSourceChoice.borderSpec)
+                anchors.bottomMargin: Border.bottom(windowSourceChoice.borderSpec)
+                anchors.leftMargin: Border.left(windowSourceChoice.borderSpec)
+                windowAddress: root.sourceSelection === "window"
+                  && root.sourceWindowIndex >= 0
+                  && root.sourceWindowIndex < root.sourceWindows.length
+                  ? String(root.sourceWindows[root.sourceWindowIndex].address || "") : ""
+                live: root.opened && root.sourceMode === "window"
+              }
+
+              Rectangle {
+                anchors.left: parent.left
+                anchors.bottom: parent.bottom
+                anchors.leftMargin: Style.space(8)
+                anchors.bottomMargin: Style.space(8)
+                implicitWidth: windowSourceLabel.implicitWidth + Style.space(10)
+                implicitHeight: windowSourceLabel.implicitHeight + Style.space(5)
+                color: Color.popups.background
+                border.width: 1
+                border.color: windowSourceChoice.current
+                  ? root.urgent : Qt.alpha(root.foreground, 0.55)
+
+                Text {
+                  id: windowSourceLabel
+                  anchors.centerIn: parent
+                  text: "Window"
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: windowSourceChoice.current
+                }
+              }
+
+              TapHandler { onTapped: root.showWindowSourcePicker() }
+            }
+
+            CastSurface {
+              id: areaSourceChoice
+              width: Math.floor((receiverContent.width - Style.space(30)) / 4)
+              implicitHeight: Style.space(76)
+              current: root.sourceSelection === "region"
+              bordered: true
+              foreground: root.foreground
+              accent: root.urgent
+              borderSpec: current ? Border.flat(root.urgent, 2)
+                : Border.controlSpec("normal", foreground, accent)
+
+              Rectangle {
+                anchors.fill: parent
+                anchors.topMargin: Border.top(areaSourceChoice.borderSpec)
+                anchors.rightMargin: Border.right(areaSourceChoice.borderSpec)
+                anchors.bottomMargin: Border.bottom(areaSourceChoice.borderSpec)
+                anchors.leftMargin: Border.left(areaSourceChoice.borderSpec)
+                color: Qt.alpha(root.foreground, 0.06)
+              }
+
+              AreaSourceIcon {
+                anchors.centerIn: parent
+                iconColor: root.dim
+              }
+
+              Rectangle {
+                anchors.left: parent.left
+                anchors.bottom: parent.bottom
+                anchors.leftMargin: Style.space(8)
+                anchors.bottomMargin: Style.space(8)
+                implicitWidth: areaSourceLabel.implicitWidth + Style.space(10)
+                implicitHeight: areaSourceLabel.implicitHeight + Style.space(5)
+                color: Color.popups.background
+                border.width: 1
+                border.color: areaSourceChoice.current
+                  ? root.urgent : Qt.alpha(root.foreground, 0.55)
+
+                Text {
+                  id: areaSourceLabel
+                  anchors.centerIn: parent
+                  text: "Selection"
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: areaSourceChoice.current
+                }
+              }
+
+              TapHandler { onTapped: root.chooseAreaSource() }
+            }
+          }
+
+          Text {
+            visible: root.sourceMode === "window" && root.sourceError !== ""
+            width: parent.width
+            text: root.sourceError
+            color: root.urgent
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
           }
 
           Text {
