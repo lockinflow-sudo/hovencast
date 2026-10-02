@@ -136,6 +136,37 @@ class VirtualWorkspaceTest(unittest.TestCase):
                 self.assertIn(f'position = "{expected}"', commands[1][2])
                 self.assertEqual(state["placement"], placement)
 
+    def test_start_configures_anchor_and_output_atomically(self) -> None:
+        commands: list[list[str]] = []
+
+        def command(arguments: list[str], check: bool = True) -> str:
+            commands.append(arguments)
+            return "ok"
+
+        self.manager._command = command  # type: ignore[method-assign]
+        self.manager.monitors = mock.Mock(return_value=[PHYSICAL_MONITOR])
+        self.manager.focus = mock.Mock(return_value=Focus("eDP-1", "1"))
+
+        def select(workspace: str, _focus: Focus) -> None:
+            state = self.manager._read_state()
+            state["selected_workspace"] = workspace
+            self.manager._write_state(state)
+
+        self.manager._switch_locked = mock.Mock(side_effect=select)
+        self.manager._wait_output_ready = mock.Mock()
+
+        self.manager.start(1280, 720, "4", "right")
+
+        monitor_lua = commands[1][2]
+        self.assertIn('output = "eDP-1"', monitor_lua)
+        self.assertIn('position = "0x0"', monitor_lua)
+        self.assertIn('output = "HovenCast-TV"', monitor_lua)
+        self.assertIn('position = "1280x40"', monitor_lua)
+        self.assertLess(
+            monitor_lua.index('output = "eDP-1"'),
+            monitor_lua.index('output = "HovenCast-TV"'),
+        )
+
     def test_output_ready_waits_for_selected_workspace_and_mode(self) -> None:
         self.manager.monitors = mock.Mock(
             side_effect=[

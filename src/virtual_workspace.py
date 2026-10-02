@@ -234,8 +234,10 @@ class VirtualWorkspace:
             anchor_x = int(anchor.get("x", 0))
             anchor_y = int(anchor.get("y", 0))
             anchor_scale = float(anchor.get("scale", 1)) or 1
-            anchor_width = round(int(anchor.get("width", 0)) / anchor_scale)
-            anchor_height = round(int(anchor.get("height", 0)) / anchor_scale)
+            anchor_pixel_width = int(anchor.get("width", 0))
+            anchor_pixel_height = int(anchor.get("height", 0))
+            anchor_width = round(anchor_pixel_width / anchor_scale)
+            anchor_height = round(anchor_pixel_height / anchor_scale)
             centered_x = anchor_x + round((anchor_width - width) / 2)
             centered_y = anchor_y + round((anchor_height - height) / 2)
             positions = {
@@ -247,13 +249,25 @@ class VirtualWorkspace:
             output_x, output_y = positions[placement]
             self._command(["hyprctl", "output", "create", "headless", self.output])
             try:
-                monitor_lua = (
+                # The generic Omarchy monitor rule uses automatic positioning.
+                # Apply the local and virtual output rules together so Hyprland
+                # cannot resolve the local display to the opposite edge.
+                anchor_refresh = float(anchor.get("refreshRate", 60) or 60)
+                anchor_transform = int(anchor.get("transform", 0) or 0)
+                anchor_lua = (
+                    "hl.monitor({ output = "
+                    + _lua_string(str(anchor.get("name", local.monitor)))
+                    + f", mode = {_lua_string(f'{anchor_pixel_width}x{anchor_pixel_height}@{anchor_refresh:.3f}')}, "
+                    + f"position = {_lua_string(f'{anchor_x}x{anchor_y}')}, "
+                    + f"scale = {anchor_scale}, transform = {anchor_transform} }})"
+                )
+                output_lua = (
                     "hl.monitor({ output = "
                     + _lua_string(self.output)
                     + f", mode = {_lua_string(f'{width}x{height}@60')}, "
                     + f"position = {_lua_string(f'{output_x}x{output_y}')}, scale = 1 }})"
                 )
-                self._command(["hyprctl", "eval", monitor_lua])
+                self._command(["hyprctl", "eval", anchor_lua + "\n" + output_lua])
                 state: dict[str, Any] = {
                     "version": STATE_VERSION,
                     "pid": os.getpid(),
