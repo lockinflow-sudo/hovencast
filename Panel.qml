@@ -1326,7 +1326,7 @@ Panel {
 
                 Text {
                   width: parent.width
-                  text: "Keep audio here"
+                  text: "Audio on computer"
                   color: root.foreground
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.bodySmall
@@ -1336,7 +1336,9 @@ Panel {
 
                 Text {
                   width: parent.width
-                  text: root.keepLocalAudio ? "Computer + TV" : "Follows its window"
+                  text: root.keepLocalAudio
+                    ? "Computer + TV"
+                    : (root.sourceMode === "workspace" ? "Follows the workspace" : "TV only")
                   color: root.dim
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
