@@ -1398,7 +1398,7 @@ Panel {
                 anchors.right: parent.right
                 anchors.rightMargin: Style.space(12)
                 anchors.verticalCenter: parent.verticalCenter
-                text: "▾"
+                text: root.displayPlacementMenuOpen ? "▴" : "▾"
                 color: root.sessionActive ? root.dim : root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
@@ -1412,11 +1412,56 @@ Panel {
                 enabled: !root.sessionActive
                 onClicked: root.displayPlacementMenuOpen = !root.displayPlacementMenuOpen
               }
+            }
+          }
 
-              PanelToolTip {
-                visible: compactPlacementMouse.containsMouse
-                text: "Display Placement"
-                fontFamily: root.fontFamily
+          RowLayout {
+            visible: root.sourceMode === "workspace" && root.displayPlacementMenuOpen
+            width: parent.width
+            spacing: Style.space(8)
+
+            Item {
+              Layout.preferredWidth: compactPlacementButton.x
+            }
+
+            GridLayout {
+              Layout.fillWidth: true
+              columns: 2
+              columnSpacing: Style.space(6)
+              rowSpacing: Style.space(6)
+
+              Repeater {
+                model: [
+                  { value: "left", label: "←  Left" },
+                  { value: "above", label: "↑  Above" },
+                  { value: "below", label: "↓  Below" },
+                  { value: "right", label: "Right  →" }
+                ]
+
+                CastSurface {
+                  required property var modelData
+                  Layout.fillWidth: true
+                  implicitHeight: Style.space(32)
+                  current: root.displayPlacement === String(modelData.value)
+                  bordered: true
+                  foreground: root.foreground
+                  accent: root.urgent
+                  borderSpec: current ? Border.flat(root.urgent, 2)
+                    : Border.controlSpec("normal", foreground, accent)
+
+                  Text {
+                    anchors.centerIn: parent
+                    text: String(parent.modelData.label)
+                    color: root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    font.bold: parent.current
+                  }
+
+                  TapHandler {
+                    onTapped: root.persistDisplayPlacement(String(parent.modelData.value))
+                  }
+                }
               }
             }
           }
@@ -1497,46 +1542,6 @@ Panel {
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             wrapMode: Text.WordWrap
-          }
-
-          RowLayout {
-            visible: root.sourceMode === "workspace" && root.displayPlacementMenuOpen
-            width: parent.width
-            spacing: Style.space(8)
-
-            Repeater {
-              model: [
-                { value: "left", label: "←  Left" },
-                { value: "above", label: "↑  Above" },
-                { value: "below", label: "↓  Below" },
-                { value: "right", label: "Right  →" }
-              ]
-
-              CastSurface {
-                required property var modelData
-                Layout.fillWidth: true
-                implicitHeight: Style.space(36)
-                current: root.displayPlacement === String(modelData.value)
-                bordered: true
-                foreground: root.foreground
-                accent: root.urgent
-                borderSpec: current ? Border.flat(root.urgent, 2)
-                  : Border.controlSpec("normal", foreground, accent)
-
-                Text {
-                  anchors.centerIn: parent
-                  text: String(parent.modelData.label)
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                  font.bold: parent.current
-                }
-
-                TapHandler {
-                  onTapped: root.persistDisplayPlacement(String(parent.modelData.value))
-                }
-              }
-            }
           }
 
           Flow {
