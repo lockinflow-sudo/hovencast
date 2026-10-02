@@ -1101,15 +1101,28 @@ Panel {
               width: parent.width
               columns: 2
               spacing: Style.space(10)
+              property real uniformDescriptionHeight: Math.ceil(Style.font.bodySmall * 3.2)
+
+              function updateDescriptionHeight() {
+                var nextHeight = Math.ceil(Style.font.bodySmall * 3.2)
+                for (var i = 0; i < sourceWindowRepeater.count; i++) {
+                  var card = sourceWindowRepeater.itemAt(i)
+                  if (card) nextHeight = Math.max(nextHeight, card.descriptionNaturalHeight)
+                }
+                uniformDescriptionHeight = nextHeight
+              }
 
               Repeater {
+                id: sourceWindowRepeater
                 model: root.sourceWindows
+                onCountChanged: Qt.callLater(sourceWindowGrid.updateDescriptionHeight)
 
                 CastSurface {
                   id: sourceWindowCard
                   required property var modelData
                   required property int index
                   readonly property bool selected: root.sourceWindowIndex === index
+                  readonly property real descriptionNaturalHeight: windowDescription.implicitHeight
                   readonly property string applicationName: {
                     var rawName = String(modelData.appClass || "Application").replace(/[-_.]+/g, " ")
                     if (rawName.toLowerCase() === "chatgpt") return "ChatGPT"
@@ -1121,6 +1134,7 @@ Panel {
                     }
                     return words.join(" ")
                   }
+                  onDescriptionNaturalHeightChanged: Qt.callLater(sourceWindowGrid.updateDescriptionHeight)
 
                   width: Math.floor((sourceWindowGrid.width - sourceWindowGrid.spacing) / 2)
                   implicitHeight: applicationNameLabel.implicitHeight
@@ -1172,7 +1186,7 @@ Panel {
                     anchors.leftMargin: Style.space(10)
                     anchors.rightMargin: Style.space(10)
                     anchors.topMargin: Style.space(7)
-                    height: Math.max(implicitHeight, Math.ceil(font.pixelSize * 3.2))
+                    height: sourceWindowGrid.uniformDescriptionHeight
                     text: String(sourceWindowCard.modelData.title || "Application window")
                     color: root.dim
                     font.family: root.fontFamily
