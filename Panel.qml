@@ -637,6 +637,41 @@ Panel {
     }
   }
 
+  component WindowPreview: Item {
+    id: windowPreview
+
+    property string windowAddress: ""
+    property bool live: false
+    readonly property var toplevel: {
+      var requested = String(windowAddress).toLowerCase().replace(/^0x/, "")
+      var values = Hyprland.toplevels.values
+      for (var i = 0; i < values.length; i++) {
+        var address = String(values[i].address).toLowerCase().replace(/^0x/, "")
+        if (address === requested) return values[i]
+      }
+      return null
+    }
+
+    Rectangle {
+      anchors.fill: parent
+      color: Qt.alpha(root.foreground, 0.06)
+    }
+
+    ScreencopyView {
+      anchors.fill: parent
+      captureSource: windowPreview.toplevel ? windowPreview.toplevel.wayland : null
+      live: windowPreview.live && captureSource !== null
+      paintCursor: false
+      constraintSize: Qt.size(width, height)
+    }
+
+    WindowSourceIcon {
+      visible: !windowPreview.toplevel || !windowPreview.toplevel.wayland
+      anchors.centerIn: parent
+      iconColor: root.dim
+    }
+  }
+
   component HovenCastSymbol: Canvas {
     property color iconColor: root.foreground
 
@@ -1060,48 +1095,88 @@ Panel {
               wrapMode: Text.WordWrap
             }
 
-            Repeater {
-              model: root.sourcePickerPage === "windows" ? root.sourceWindows : []
+            Grid {
+              id: sourceWindowGrid
+              visible: root.sourcePickerPage === "windows"
+              width: parent.width
+              columns: 2
+              spacing: Style.space(10)
 
-              CastSurface {
-                id: sourceWindowRow
-                required property var modelData
-                required property int index
-                width: sourcePickerContent.width
-                implicitHeight: windowLabels.implicitHeight + Style.space(24)
-                hasCursor: root.sourceWindowIndex === index
-                bordered: true
-                foreground: root.foreground
+              Repeater {
+                model: root.sourceWindows
 
-                Row {
-                  anchors.left: parent.left
-                  anchors.right: parent.right
-                  anchors.verticalCenter: parent.verticalCenter
-                  anchors.leftMargin: Style.space(14)
-                  anchors.rightMargin: Style.space(14)
-                  spacing: Style.space(10)
+                CastSurface {
+                  id: sourceWindowCard
+                  required property var modelData
+                  required property int index
+                  readonly property bool selected: root.sourceWindowIndex === index
 
-                  WindowSourceIcon {
-                    iconColor: root.foreground
-                    anchors.verticalCenter: parent.verticalCenter
+                  width: Math.floor((sourceWindowGrid.width - sourceWindowGrid.spacing) / 2)
+                  implicitHeight: windowPreviewImage.implicitHeight
+                    + windowLabels.implicitHeight + Style.space(18)
+                  hasCursor: selected
+                  current: selected
+                  bordered: true
+                  foreground: root.foreground
+                  accent: root.urgent
+                  borderSpec: selected ? Border.flat(root.urgent, 2)
+                    : Border.controlSpec("normal", foreground, accent)
+
+                  WindowPreview {
+                    id: windowPreviewImage
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.topMargin: Border.top(sourceWindowCard.borderSpec)
+                    anchors.leftMargin: Border.left(sourceWindowCard.borderSpec)
+                    anchors.rightMargin: Border.right(sourceWindowCard.borderSpec)
+                    implicitHeight: Math.round(sourceWindowCard.width * 0.56)
+                    windowAddress: String(sourceWindowCard.modelData.address || "")
+                    live: root.opened && root.sourcePickerVisible
+                      && root.sourcePickerPage === "windows"
+                  }
+
+                  Rectangle {
+                    visible: sourceWindowCard.selected
+                    anchors.top: parent.top
+                    anchors.right: parent.right
+                    anchors.topMargin: Style.space(7)
+                    anchors.rightMargin: Style.space(7)
+                    implicitWidth: Style.space(24)
+                    implicitHeight: Style.space(24)
+                    color: root.urgent
+
+                    Text {
+                      anchors.centerIn: parent
+                      text: "✓"
+                      color: Color.popups.background
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.body
+                      font.bold: true
+                    }
                   }
 
                   Column {
                     id: windowLabels
-                    width: parent.width - parent.children[0].width - Style.space(10)
-                    spacing: Style.space(4)
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: windowPreviewImage.bottom
+                    anchors.leftMargin: Style.space(10)
+                    anchors.rightMargin: Style.space(10)
+                    anchors.topMargin: Style.space(7)
+                    spacing: Style.space(2)
 
                     Text {
                       width: parent.width
-                      text: String(sourceWindowRow.modelData.title || "Application window")
+                      text: String(sourceWindowCard.modelData.title || "Application window")
                       color: root.foreground
                       font.family: root.fontFamily
-                      font.pixelSize: Style.font.body
+                      font.pixelSize: Style.font.bodySmall
                       elide: Text.ElideRight
                     }
                     Text {
                       width: parent.width
-                      text: String(sourceWindowRow.modelData.appClass || "WINDOW").toUpperCase()
+                      text: String(sourceWindowCard.modelData.appClass || "WINDOW").toUpperCase()
                       color: root.dim
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.caption
@@ -1109,13 +1184,11 @@ Panel {
                       elide: Text.ElideRight
                     }
                   }
-                }
 
-                HoverHandler { onHoveredChanged: if (hovered) root.sourceWindowIndex = sourceWindowRow.index }
-                TapHandler {
-                  onTapped: {
-                    root.chooseSourceWindow(sourceWindowRow.index)
+                  HoverHandler {
+                    onHoveredChanged: if (hovered) root.sourceWindowIndex = sourceWindowCard.index
                   }
+                  TapHandler { onTapped: root.chooseSourceWindow(sourceWindowCard.index) }
                 }
               }
             }
