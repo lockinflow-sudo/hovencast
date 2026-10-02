@@ -1666,6 +1666,7 @@ Panel {
               required property var modelData
               required property int index
               readonly property bool selected: root.selectedIndex === index
+              readonly property bool detailsVisible: receiverHover.hovered
 
               width: content.width
               implicitHeight: receiverRowContent.implicitHeight + Style.space(28)
@@ -1737,14 +1738,14 @@ Panel {
                 }
 
                 Rectangle {
-                  visible: receiverRow.selected
+                  visible: receiverRow.detailsVisible
                   Layout.fillWidth: true
                   implicitHeight: 1
                   color: Qt.alpha(root.foreground, 0.18)
                 }
 
                 GridLayout {
-                  visible: receiverRow.selected
+                  visible: receiverRow.detailsVisible
                   Layout.fillWidth: true
                   columns: 2
                   columnSpacing: Style.space(12)
@@ -1791,6 +1792,7 @@ Panel {
               }
 
               HoverHandler {
+                id: receiverHover
                 onHoveredChanged: if (hovered) root.selectReceiver(receiverRow.index)
               }
 
