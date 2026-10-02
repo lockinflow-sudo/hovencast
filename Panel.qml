@@ -1420,47 +1420,36 @@ Panel {
             width: parent.width
             spacing: Style.space(8)
 
-            Item {
-              Layout.preferredWidth: compactPlacementButton.x
-            }
+            Repeater {
+              model: [
+                { value: "left", label: "←  Left" },
+                { value: "above", label: "↑  Above" },
+                { value: "below", label: "↓  Below" },
+                { value: "right", label: "Right  →" }
+              ]
 
-            GridLayout {
-              Layout.fillWidth: true
-              columns: 2
-              columnSpacing: Style.space(6)
-              rowSpacing: Style.space(6)
+              CastSurface {
+                required property var modelData
+                Layout.fillWidth: true
+                implicitHeight: Style.space(36)
+                current: root.displayPlacement === String(modelData.value)
+                bordered: true
+                foreground: root.foreground
+                accent: root.urgent
+                borderSpec: current ? Border.flat(root.urgent, 2)
+                  : Border.controlSpec("normal", foreground, accent)
 
-              Repeater {
-                model: [
-                  { value: "left", label: "←  Left" },
-                  { value: "above", label: "↑  Above" },
-                  { value: "below", label: "↓  Below" },
-                  { value: "right", label: "Right  →" }
-                ]
+                Text {
+                  anchors.centerIn: parent
+                  text: String(parent.modelData.label)
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: parent.current
+                }
 
-                CastSurface {
-                  required property var modelData
-                  Layout.fillWidth: true
-                  implicitHeight: Style.space(32)
-                  current: root.displayPlacement === String(modelData.value)
-                  bordered: true
-                  foreground: root.foreground
-                  accent: root.urgent
-                  borderSpec: current ? Border.flat(root.urgent, 2)
-                    : Border.controlSpec("normal", foreground, accent)
-
-                  Text {
-                    anchors.centerIn: parent
-                    text: String(parent.modelData.label)
-                    color: root.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                    font.bold: parent.current
-                  }
-
-                  TapHandler {
-                    onTapped: root.persistDisplayPlacement(String(parent.modelData.value))
-                  }
+                TapHandler {
+                  onTapped: root.persistDisplayPlacement(String(parent.modelData.value))
                 }
               }
             }
