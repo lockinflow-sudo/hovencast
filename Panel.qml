@@ -2,7 +2,9 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
+import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
@@ -569,6 +571,74 @@ Panel {
     }
   }
 
+  // Local chrome keeps the shell palette and existing interaction states.
+  component CastSurface: CursorSurface {
+    radius: 0
+  }
+
+  component CastSectionHeader: PanelSectionHeader {
+    font.letterSpacing: 1.5
+  }
+
+  component WorkspacePreview: Item {
+    id: workspacePreview
+
+    property string workspaceName: ""
+    property bool live: false
+    readonly property var workspace: {
+      var values = Hyprland.workspaces.values
+      for (var i = 0; i < values.length; i++) {
+        if (String(values[i].name) === workspaceName) return values[i]
+      }
+      return null
+    }
+    readonly property var monitor: workspace ? workspace.monitor : null
+
+    Rectangle {
+      anchors.fill: parent
+      color: Qt.alpha(root.foreground, 0.06)
+      border.width: 1
+      border.color: Qt.alpha(root.foreground, 0.32)
+    }
+
+    clip: true
+
+    Repeater {
+      model: workspacePreview.workspace ? workspacePreview.workspace.toplevels : null
+
+      ScreencopyView {
+        required property var modelData
+        readonly property var ipc: modelData.lastIpcObject || ({})
+        readonly property var position: ipc.at || [0, 0]
+        readonly property var dimensions: ipc.size || [1, 1]
+        readonly property real monitorScale: workspacePreview.monitor
+          ? Math.max(0.1, workspacePreview.monitor.scale) : 1
+        readonly property real monitorWidth: workspacePreview.monitor
+          ? Math.max(1, workspacePreview.monitor.width / monitorScale) : 1280
+        readonly property real monitorHeight: workspacePreview.monitor
+          ? Math.max(1, workspacePreview.monitor.height / monitorScale) : 720
+        readonly property real monitorX: workspacePreview.monitor
+          ? workspacePreview.monitor.x : 0
+        readonly property real monitorY: workspacePreview.monitor
+          ? workspacePreview.monitor.y : 0
+
+        x: Math.round((Number(position[0]) - monitorX)
+          / monitorWidth * workspacePreview.width)
+        y: Math.round((Number(position[1]) - monitorY)
+          / monitorHeight * workspacePreview.height)
+        width: Math.max(1, Math.round(Number(dimensions[0])
+          / monitorWidth * workspacePreview.width))
+        height: Math.max(1, Math.round(Number(dimensions[1])
+          / monitorHeight * workspacePreview.height))
+        z: 1000 - Number(ipc.focusHistoryID || 999)
+        captureSource: modelData.wayland
+        live: workspacePreview.live && captureSource !== null
+        paintCursor: false
+        constraintSize: Qt.size(width, height)
+      }
+    }
+  }
+
   component HovenCastSymbol: Canvas {
     property color iconColor: root.foreground
 
@@ -693,8 +763,9 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(root.sourcePickerVisible ? 430 : 390))
-    contentHeight: panel.fittedContentHeight(content.implicitHeight, Style.space(620))
+    padding: Style.space(24)
+    contentWidth: panel.fittedContentWidth(Style.space(560))
+    contentHeight: panel.fittedContentHeight(content.implicitHeight, Style.space(800))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -738,7 +809,7 @@ Panel {
             id: sourcePickerContent
             visible: root.sourcePickerVisible
             width: parent.width
-            spacing: Style.space(12)
+            spacing: Style.space(18)
 
             PanelHero {
               width: parent.width
@@ -764,6 +835,8 @@ Panel {
               }
             }
 
+            PanelSeparator { foreground: root.foreground }
+
             Text {
               visible: root.sourcePickerPage === "ready"
               width: parent.width
@@ -774,7 +847,7 @@ Panel {
               wrapMode: Text.WordWrap
             }
 
-            CursorSurface {
+            CastSurface {
               id: displayPreview
               visible: root.sourcePickerPage === "ready"
               width: parent.width
@@ -822,10 +895,10 @@ Panel {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                anchors.leftMargin: Style.space(10)
-                anchors.rightMargin: Style.space(10)
+                anchors.leftMargin: Style.space(14)
+                anchors.rightMargin: Style.space(14)
                 anchors.bottomMargin: Style.space(9)
-                spacing: Style.space(1)
+                spacing: Style.space(4)
 
                 Text {
                   width: parent.width
@@ -862,7 +935,7 @@ Panel {
               width: parent.width
               spacing: Style.space(8)
 
-              CursorSurface {
+              CastSurface {
                 id: windowSourceOption
                 Layout.fillWidth: true
                 implicitHeight: Style.space(48)
@@ -901,7 +974,7 @@ Panel {
                 }
               }
 
-              CursorSurface {
+              CastSurface {
                 id: areaSourceOption
                 Layout.fillWidth: true
                 implicitHeight: Style.space(48)
@@ -941,7 +1014,7 @@ Panel {
               }
             }
 
-            CursorSurface {
+            CastSurface {
               visible: root.sourcePickerPage === "ready"
               width: parent.width
               implicitHeight: Style.space(52)
@@ -992,12 +1065,12 @@ Panel {
             Repeater {
               model: root.sourcePickerPage === "windows" ? root.sourceWindows : []
 
-              CursorSurface {
+              CastSurface {
                 id: sourceWindowRow
                 required property var modelData
                 required property int index
                 width: sourcePickerContent.width
-                implicitHeight: windowLabels.implicitHeight + Style.space(16)
+                implicitHeight: windowLabels.implicitHeight + Style.space(24)
                 hasCursor: root.sourceWindowIndex === index
                 bordered: true
                 foreground: root.foreground
@@ -1006,8 +1079,8 @@ Panel {
                   anchors.left: parent.left
                   anchors.right: parent.right
                   anchors.verticalCenter: parent.verticalCenter
-                  anchors.leftMargin: Style.space(10)
-                  anchors.rightMargin: Style.space(10)
+                  anchors.leftMargin: Style.space(14)
+                  anchors.rightMargin: Style.space(14)
                   spacing: Style.space(10)
 
                   WindowSourceIcon {
@@ -1018,7 +1091,7 @@ Panel {
                   Column {
                     id: windowLabels
                     width: parent.width - parent.children[0].width - Style.space(10)
-                    spacing: Style.space(1)
+                    spacing: Style.space(4)
 
                     Text {
                       width: parent.width
@@ -1049,10 +1122,10 @@ Panel {
               }
             }
 
-            CursorSurface {
+            CastSurface {
               visible: root.sourcePickerPage === "windows"
               width: parent.width
-              implicitHeight: Style.space(44)
+              implicitHeight: Style.space(48)
               bordered: true
               foreground: root.foreground
 
@@ -1076,7 +1149,7 @@ Panel {
             id: receiverContent
             visible: !root.sourcePickerVisible
             width: parent.width
-            spacing: Style.space(12)
+            spacing: Style.space(20)
 
           PanelHero {
             width: parent.width
@@ -1170,7 +1243,7 @@ Panel {
             foreground: root.foreground
           }
 
-          PanelSectionHeader {
+          CastSectionHeader {
             width: parent.width
             text: "CAST SOURCE"
             foreground: root.foreground
@@ -1181,9 +1254,9 @@ Panel {
             width: parent.width
             spacing: Style.space(8)
 
-            CursorSurface {
+            CastSurface {
               Layout.fillWidth: true
-              implicitHeight: Style.space(44)
+              implicitHeight: Style.space(48)
               current: root.sourceMode === "workspace"
               bordered: true
               foreground: root.foreground
@@ -1204,9 +1277,9 @@ Panel {
               }
             }
 
-            CursorSurface {
+            CastSurface {
               Layout.fillWidth: true
-              implicitHeight: Style.space(44)
+              implicitHeight: Style.space(48)
               current: root.sourceMode === "window"
               bordered: true
               foreground: root.foreground
@@ -1243,17 +1316,17 @@ Panel {
           Flow {
             visible: root.sourceMode === "workspace"
             width: parent.width
-            spacing: Style.space(7)
+            spacing: Style.space(10)
 
             Repeater {
               model: root.availableWorkspaces
 
-              CursorSurface {
+              CastSurface {
                 id: workspaceChoice
                 required property var modelData
                 required property int index
-                width: Math.max(Style.space(58), workspaceLabel.implicitWidth + Style.space(22))
-                implicitHeight: Style.space(38)
+                width: Math.floor((receiverContent.width - Style.space(30)) / 4)
+                implicitHeight: Style.space(76)
                 current: root.selectedWorkspaceIndex === index
                 bordered: true
                 foreground: root.foreground
@@ -1261,16 +1334,34 @@ Panel {
                 borderSpec: current ? Border.flat(root.urgent, 2)
                   : Border.controlSpec("normal", foreground, accent)
 
-                Text {
-                  id: workspaceLabel
-                  anchors.centerIn: parent
-                  text: String(workspaceChoice.modelData.name)
-                    + (Number(workspaceChoice.modelData.windows || 0) > 0
-                      ? " · " + Number(workspaceChoice.modelData.windows) : "")
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  font.bold: workspaceChoice.current
+                WorkspacePreview {
+                  anchors.fill: parent
+                  anchors.margins: Style.space(8)
+                  workspaceName: String(workspaceChoice.modelData.name)
+                  live: root.opened && root.sourceMode === "workspace"
+                }
+
+                Rectangle {
+                  anchors.left: parent.left
+                  anchors.bottom: parent.bottom
+                  anchors.leftMargin: Style.space(10)
+                  anchors.bottomMargin: Style.space(10)
+                  implicitWidth: workspaceLabel.implicitWidth + Style.space(12)
+                  implicitHeight: workspaceLabel.implicitHeight + Style.space(6)
+                  color: Color.popups.background
+                  border.width: 1
+                  border.color: workspaceChoice.current
+                    ? root.urgent : Qt.alpha(root.foreground, 0.55)
+
+                  Text {
+                    id: workspaceLabel
+                    anchors.centerIn: parent
+                    text: String(workspaceChoice.modelData.name)
+                    color: root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    font.bold: workspaceChoice.current
+                  }
                 }
 
                 TapHandler {
@@ -1296,7 +1387,7 @@ Panel {
             width: parent.width
             spacing: Style.space(8)
 
-            CursorSurface {
+            CastSurface {
               Layout.fillWidth: true
               implicitHeight: Style.space(40)
               bordered: true
@@ -1311,7 +1402,7 @@ Panel {
               TapHandler { onTapped: root.focusTvWorkspace() }
             }
 
-            CursorSurface {
+            CastSurface {
               Layout.fillWidth: true
               implicitHeight: Style.space(40)
               bordered: true
@@ -1351,7 +1442,7 @@ Panel {
             foreground: root.foreground
           }
 
-          PanelSectionHeader {
+          CastSectionHeader {
             width: parent.width
             text: "AVAILABLE DISPLAYS"
             foreground: root.foreground
@@ -1371,14 +1462,14 @@ Panel {
           Repeater {
             model: root.receivers
 
-            CursorSurface {
+            CastSurface {
               id: receiverRow
               required property var modelData
               required property int index
               readonly property bool selected: root.selectedIndex === index
 
               width: content.width
-              implicitHeight: receiverRowContent.implicitHeight + Style.space(14)
+              implicitHeight: receiverRowContent.implicitHeight + Style.space(28)
               hasCursor: root.cursorActive && root.selectedIndex === index
               current: selected || root.activeAddress === String(modelData.address || "")
               foreground: root.foreground
@@ -1388,9 +1479,9 @@ Panel {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                anchors.leftMargin: Style.space(10)
-                anchors.rightMargin: Style.space(8)
-                spacing: Style.space(7)
+                anchors.leftMargin: Style.space(14)
+                anchors.rightMargin: Style.space(14)
+                spacing: Style.space(10)
 
                 RowLayout {
                   Layout.fillWidth: true
@@ -1407,7 +1498,7 @@ Panel {
 
                   ColumnLayout {
                     Layout.fillWidth: true
-                    spacing: Style.space(1)
+                    spacing: Style.space(4)
 
                     Text {
                       Layout.fillWidth: true
