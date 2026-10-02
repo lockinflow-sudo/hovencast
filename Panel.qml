@@ -1148,11 +1148,12 @@ Panel {
 
                     Text {
                       width: parent.width
+                      height: Math.max(implicitHeight, Math.ceil(font.pixelSize * 3.2))
                       text: String(sourceWindowCard.modelData.title || "Application window")
                       color: root.foreground
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.bodySmall
-                      elide: Text.ElideRight
+                      wrapMode: Text.WordWrap
                     }
                     Text {
                       width: parent.width
