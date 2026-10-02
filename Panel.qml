@@ -1110,10 +1110,22 @@ Panel {
                   required property var modelData
                   required property int index
                   readonly property bool selected: root.sourceWindowIndex === index
+                  readonly property string applicationName: {
+                    var rawName = String(modelData.appClass || "Application").replace(/[-_.]+/g, " ")
+                    if (rawName.toLowerCase() === "chatgpt") return "ChatGPT"
+                    var words = rawName.split(/\s+/)
+                    for (var i = 0; i < words.length; i++) {
+                      if (words[i].length > 0) {
+                        words[i] = words[i].charAt(0).toUpperCase() + words[i].slice(1)
+                      }
+                    }
+                    return words.join(" ")
+                  }
 
                   width: Math.floor((sourceWindowGrid.width - sourceWindowGrid.spacing) / 2)
-                  implicitHeight: windowPreviewImage.implicitHeight
-                    + windowLabels.implicitHeight + Style.space(18)
+                  implicitHeight: applicationNameLabel.implicitHeight
+                    + windowPreviewImage.implicitHeight
+                    + windowDescription.height + Style.space(30)
                   hasCursor: selected
                   current: selected
                   bordered: true
@@ -1122,12 +1134,28 @@ Panel {
                   borderSpec: selected ? Border.flat(root.urgent, 2)
                     : Border.controlSpec("normal", foreground, accent)
 
+                  Text {
+                    id: applicationNameLabel
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.topMargin: Style.space(7)
+                    anchors.leftMargin: Style.space(10)
+                    anchors.rightMargin: Style.space(10)
+                    text: sourceWindowCard.applicationName
+                    color: root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    font.bold: true
+                    elide: Text.ElideRight
+                  }
+
                   WindowPreview {
                     id: windowPreviewImage
                     anchors.left: parent.left
                     anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.topMargin: Border.top(sourceWindowCard.borderSpec)
+                    anchors.top: applicationNameLabel.bottom
+                    anchors.topMargin: Style.space(7)
                     anchors.leftMargin: Border.left(sourceWindowCard.borderSpec)
                     anchors.rightMargin: Border.right(sourceWindowCard.borderSpec)
                     implicitHeight: Math.round(sourceWindowCard.width * 0.56)
@@ -1136,34 +1164,20 @@ Panel {
                       && root.sourcePickerPage === "windows"
                   }
 
-                  Column {
-                    id: windowLabels
+                  Text {
+                    id: windowDescription
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.top: windowPreviewImage.bottom
                     anchors.leftMargin: Style.space(10)
                     anchors.rightMargin: Style.space(10)
                     anchors.topMargin: Style.space(7)
-                    spacing: Style.space(2)
-
-                    Text {
-                      width: parent.width
-                      height: Math.max(implicitHeight, Math.ceil(font.pixelSize * 3.2))
-                      text: String(sourceWindowCard.modelData.title || "Application window")
-                      color: root.foreground
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.bodySmall
-                      wrapMode: Text.WordWrap
-                    }
-                    Text {
-                      width: parent.width
-                      text: String(sourceWindowCard.modelData.appClass || "WINDOW").toUpperCase()
-                      color: root.dim
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.caption
-                      font.bold: true
-                      elide: Text.ElideRight
-                    }
+                    height: Math.max(implicitHeight, Math.ceil(font.pixelSize * 3.2))
+                    text: String(sourceWindowCard.modelData.title || "Application window")
+                    color: root.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    wrapMode: Text.WordWrap
                   }
 
                   HoverHandler {
