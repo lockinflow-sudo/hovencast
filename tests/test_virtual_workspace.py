@@ -10,14 +10,21 @@ from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
-from virtual_workspace import Focus, VirtualWorkspace, _safe_workspace  # noqa: E402
+from virtual_workspace import (  # noqa: E402
+    Focus,
+    VirtualWorkspace,
+    _safe_placement,
+    _safe_workspace,
+)
 
 
 PHYSICAL_MONITOR = {
     "name": "eDP-1",
     "focused": True,
     "x": 0,
+    "y": 0,
     "width": 1920,
+    "height": 1200,
     "scale": 1.5,
     "activeWorkspace": {"name": "1"},
 }
@@ -58,6 +65,12 @@ class VirtualWorkspaceTest(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 _safe_workspace(invalid)
 
+    def test_display_placement_validation(self) -> None:
+        for placement in ("left", "above", "below", "right"):
+            self.assertEqual(_safe_placement(placement), placement)
+        with self.assertRaises(ValueError):
+            _safe_placement("diagonal")
+
     def test_start_creates_a_tv_sized_headless_output(self) -> None:
         commands: list[list[str]] = []
 
@@ -84,9 +97,44 @@ class VirtualWorkspaceTest(unittest.TestCase):
         )
         self.assertEqual(commands[1][:2], ["hyprctl", "eval"])
         self.assertIn('mode = "1280x720@60"', commands[1][2])
-        self.assertIn('position = "1280x0"', commands[1][2])
+        self.assertIn('position = "1280x40"', commands[1][2])
         self.assertEqual(state["selected_workspace"], "4")
+        self.assertEqual(state["placement"], "right")
         self.manager._wait_output_ready.assert_called_once_with("4", 1280, 720)
+
+    def test_start_positions_output_at_the_selected_laptop_edge(self) -> None:
+        commands: list[list[str]] = []
+
+        def command(arguments: list[str], check: bool = True) -> str:
+            commands.append(arguments)
+            return "ok"
+
+        self.manager._command = command  # type: ignore[method-assign]
+        self.manager.monitors = mock.Mock(return_value=[PHYSICAL_MONITOR])
+        self.manager.focus = mock.Mock(return_value=Focus("eDP-1", "1"))
+        self.manager.recover_stale = mock.Mock()
+
+        def select(workspace: str, _focus: Focus) -> None:
+            state = self.manager._read_state()
+            state["selected_workspace"] = workspace
+            self.manager._write_state(state)
+
+        self.manager._switch_locked = mock.Mock(side_effect=select)
+        self.manager._wait_output_ready = mock.Mock()
+        positions = {
+            "left": "-1280x40",
+            "above": "0x-720",
+            "below": "0x800",
+            "right": "1280x40",
+        }
+
+        for placement, expected in positions.items():
+            with self.subTest(placement=placement):
+                commands.clear()
+                self.manager.state_path.unlink(missing_ok=True)
+                state = self.manager.start(1280, 720, "4", placement)
+                self.assertIn(f'position = "{expected}"', commands[1][2])
+                self.assertEqual(state["placement"], placement)
 
     def test_output_ready_waits_for_selected_workspace_and_mode(self) -> None:
         self.manager.monitors = mock.Mock(

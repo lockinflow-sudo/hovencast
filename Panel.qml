@@ -45,6 +45,8 @@ Panel {
   property int sourceCursor: 3
   property int sourceWindowIndex: 0
   property string sourceMode: "workspace"
+  property string displayPlacement: String(setting("displayPlacement", "right"))
+  property bool displayPlacementMenuOpen: false
   property var availableWorkspaces: []
   property int selectedWorkspaceIndex: 0
   property string activeWorkspaceName: ""
@@ -70,6 +72,31 @@ Panel {
     var entry = { id: moduleName }
     for (var key in settings) if (key !== "id") entry[key] = settings[key]
     entry.keepLocalAudio = enabled
+    bar.shell.updateEntryInline(moduleName, entry)
+  }
+
+  function normalizedDisplayPlacement(value) {
+    var placement = String(value || "right").toLowerCase()
+    return ["left", "above", "below", "right"].indexOf(placement) >= 0
+      ? placement : "right"
+  }
+
+  function displayPlacementLabel(value) {
+    switch (normalizedDisplayPlacement(value)) {
+      case "left": return "←  Left"
+      case "above": return "↑  Above"
+      case "below": return "↓  Below"
+      default: return "Right  →"
+    }
+  }
+
+  function persistDisplayPlacement(value) {
+    displayPlacement = normalizedDisplayPlacement(value)
+    displayPlacementMenuOpen = false
+    if (!bar || !bar.shell || typeof bar.shell.updateEntryInline !== "function") return
+    var entry = { id: moduleName }
+    for (var key in settings) if (key !== "id") entry[key] = settings[key]
+    entry.displayPlacement = displayPlacement
     bar.shell.updateEntryInline(moduleName, entry)
   }
 
@@ -140,6 +167,7 @@ Panel {
       }
       activeWorkspaceName = workspace
       command.push("--workspace", workspace)
+      command.push("--placement", normalizedDisplayPlacement(displayPlacement))
     }
     if (keepLocalAudio) command.push("--keep-local-audio")
     castProc.command = command
@@ -178,7 +206,10 @@ Panel {
       activeAddress = String(status.address || activeAddress)
       activeName = String(status.receiver || activeName || activeAddress)
       activeWorkspaceName = String(status.workspace || activeWorkspaceName)
-      if (activeWorkspaceName !== "") sourceMode = "workspace"
+      if (activeWorkspaceName !== "") {
+        sourceMode = "workspace"
+        displayPlacement = normalizedDisplayPlacement(status.placement || displayPlacement)
+      }
       videoFrames = Number(status.video_frames || 0)
       audioBuffers = Number(status.audio_buffers || 0)
       bitrateBps = Number(status.bitrate_bps || 0)
@@ -397,11 +428,13 @@ Panel {
   }
 
   Component.onCompleted: {
+    displayPlacement = normalizedDisplayPlacement(displayPlacement)
     pollSession()
     refresh()
   }
 
   onOpenedChanged: {
+    if (!opened) displayPlacementMenuOpen = false
     if (!opened && sourcePickerVisible && sourcePickerResult === "pending") cancelSourcePicker()
     if (opened && !sessionActive) refresh()
     if (opened) cursorActive = false
@@ -1376,23 +1409,104 @@ Panel {
               }
               TapHandler {
                 enabled: !root.sessionActive
-                onTapped: root.sourceMode = "window"
+                onTapped: {
+                  root.sourceMode = "window"
+                  root.displayPlacementMenuOpen = false
+                }
               }
             }
           }
 
-          Text {
-            visible: true
+          RowLayout {
             width: parent.width
-            text: root.sourceMode === "workspace"
-              ? (root.sessionState === "streaming"
-                ? "Choose another workspace without reconnecting the TV."
-                : "Put a workspace on a dedicated wireless display.")
-              : "Share a workspace, application window, or selected area."
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            wrapMode: Text.WordWrap
+            spacing: Style.space(10)
+
+            Text {
+              Layout.fillWidth: true
+              text: root.sourceMode === "workspace"
+                ? (root.sessionState === "streaming"
+                  ? "Choose another workspace without reconnecting the TV."
+                  : "Put a workspace on a dedicated wireless display.")
+                : "Share a workspace, application window, or selected area."
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
+
+            CastSurface {
+              id: placementButton
+              visible: root.sourceMode === "workspace"
+              Layout.preferredWidth: Style.space(116)
+              implicitHeight: Style.space(32)
+              bordered: true
+              foreground: root.foreground
+              accent: root.urgent
+
+              Text {
+                anchors.centerIn: parent
+                text: "TV:  " + root.displayPlacementLabel(root.displayPlacement) + "  ▾"
+                color: root.sessionActive ? root.dim : root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                font.bold: true
+              }
+
+              MouseArea {
+                id: placementMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: root.sessionActive ? Qt.ArrowCursor : Qt.PointingHandCursor
+                enabled: !root.sessionActive
+                onClicked: root.displayPlacementMenuOpen = !root.displayPlacementMenuOpen
+              }
+
+              PanelToolTip {
+                visible: placementMouse.containsMouse
+                text: "Display Placement"
+                fontFamily: root.fontFamily
+              }
+            }
+          }
+
+          RowLayout {
+            visible: root.sourceMode === "workspace" && root.displayPlacementMenuOpen
+            width: parent.width
+            spacing: Style.space(8)
+
+            Repeater {
+              model: [
+                { value: "left", label: "←  Left" },
+                { value: "above", label: "↑  Above" },
+                { value: "below", label: "↓  Below" },
+                { value: "right", label: "Right  →" }
+              ]
+
+              CastSurface {
+                required property var modelData
+                Layout.fillWidth: true
+                implicitHeight: Style.space(36)
+                current: root.displayPlacement === String(modelData.value)
+                bordered: true
+                foreground: root.foreground
+                accent: root.urgent
+                borderSpec: current ? Border.flat(root.urgent, 2)
+                  : Border.controlSpec("normal", foreground, accent)
+
+                Text {
+                  anchors.centerIn: parent
+                  text: String(parent.modelData.label)
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: parent.current
+                }
+
+                TapHandler {
+                  onTapped: root.persistDisplayPlacement(String(parent.modelData.value))
+                }
+              }
+            }
           }
 
           Flow {

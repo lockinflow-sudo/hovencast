@@ -50,6 +50,13 @@ def _safe_workspace(value: Any) -> str:
     return workspace
 
 
+def _safe_placement(value: Any) -> str:
+    placement = str(value or "right").strip().lower()
+    if placement not in {"left", "above", "below", "right"}:
+        raise ValueError("display placement must be left, above, below, or right")
+    return placement
+
+
 def _lua_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
@@ -200,8 +207,15 @@ class VirtualWorkspace:
             candidate += 1
         return str(candidate)
 
-    def start(self, width: int, height: int, workspace: str) -> dict[str, Any]:
+    def start(
+        self,
+        width: int,
+        height: int,
+        workspace: str,
+        placement: str = "right",
+    ) -> dict[str, Any]:
         workspace = _safe_workspace(workspace)
+        placement = _safe_placement(placement)
         with self.locked():
             self.recover_stale(lock_held=True)
             monitors = self.monitors()
@@ -213,18 +227,31 @@ class VirtualWorkspace:
             physical = [item for item in monitors if item.get("name") != self.output]
             if not physical:
                 raise RuntimeError("HovenCast needs a physical display for focus recovery")
-            right_edge = max(
-                int(item.get("x", 0))
-                + round(int(item.get("width", 0)) / (float(item.get("scale", 1)) or 1))
-                for item in physical
+            anchor = next(
+                (item for item in physical if str(item.get("name", "")) == local.monitor),
+                physical[0],
             )
+            anchor_x = int(anchor.get("x", 0))
+            anchor_y = int(anchor.get("y", 0))
+            anchor_scale = float(anchor.get("scale", 1)) or 1
+            anchor_width = round(int(anchor.get("width", 0)) / anchor_scale)
+            anchor_height = round(int(anchor.get("height", 0)) / anchor_scale)
+            centered_x = anchor_x + round((anchor_width - width) / 2)
+            centered_y = anchor_y + round((anchor_height - height) / 2)
+            positions = {
+                "left": (anchor_x - width, centered_y),
+                "above": (centered_x, anchor_y - height),
+                "below": (centered_x, anchor_y + anchor_height),
+                "right": (anchor_x + anchor_width, centered_y),
+            }
+            output_x, output_y = positions[placement]
             self._command(["hyprctl", "output", "create", "headless", self.output])
             try:
                 monitor_lua = (
                     "hl.monitor({ output = "
                     + _lua_string(self.output)
                     + f", mode = {_lua_string(f'{width}x{height}@60')}, "
-                    + f"position = {_lua_string(f'{right_edge}x0')}, scale = 1 }})"
+                    + f"position = {_lua_string(f'{output_x}x{output_y}')}, scale = 1 }})"
                 )
                 self._command(["hyprctl", "eval", monitor_lua])
                 state: dict[str, Any] = {
@@ -233,6 +260,7 @@ class VirtualWorkspace:
                     "output": self.output,
                     "width": width,
                     "height": height,
+                    "placement": placement,
                     "local_focus": {"monitor": local.monitor, "workspace": local.workspace},
                     "restore_focus": {"monitor": local.monitor, "workspace": local.workspace},
                     "selected_workspace": "",

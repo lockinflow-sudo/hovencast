@@ -57,6 +57,11 @@ fullscreen layout without changing the laptop display. A workspace is visible
 on only one output. If the laptop's visible workspace is sent to the TV,
 HovenCast first switches the laptop to another workspace.
 
+Use the compact **TV position** control to place the wireless display to the
+left, above, below, or right of the active local display. Hyprland then lets the
+pointer cross the matching screen edge. The selected placement is remembered
+for later sessions.
+
 Use the widget's **Control TV** and **Return to laptop** actions for mouse and
 keyboard focus. Omarchy's existing **Ctrl+Alt+Tab** and
 **Ctrl+Alt+Shift+Tab** monitor-focus shortcuts also move between the laptop and

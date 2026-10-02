@@ -32,6 +32,7 @@ def arguments(**overrides: object) -> argparse.Namespace:
         "duration": 0,
         "quality": "720p",
         "workspace": "1",
+        "placement": "above",
         "keep_local_audio": False,
         "ipc_target": "hoven.cast",
     }
@@ -45,6 +46,7 @@ class CastSessionTest(unittest.TestCase):
 
         self.assertIn("cast-live", command)
         self.assertEqual(command[command.index("--workspace") + 1], "1")
+        self.assertEqual(command[command.index("--placement") + 1], "above")
         self.assertEqual(command[command.index("--ipc-target") + 1], "hoven.cast")
 
         runner = session_runner_command(arguments())
@@ -166,6 +168,7 @@ class CastSessionTest(unittest.TestCase):
 
         self.assertEqual(state["pid"], 4242)
         self.assertEqual(state["workspace"], "1")
+        self.assertEqual(state["placement"], "above")
         self.assertTrue(popen.call_args.kwargs["start_new_session"])
         self.assertTrue(popen.call_args.kwargs["close_fds"])
         self.assertEqual(popen.call_args.args[0][2], "session-run")

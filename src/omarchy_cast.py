@@ -1483,7 +1483,12 @@ def run_cast_live(args: argparse.Namespace) -> int:
     picker_target_request: pathlib.Path | None = None
     if args.workspace:
         virtual_workspace = VirtualWorkspace()
-        state = virtual_workspace.start(video_mode.width, video_mode.height, args.workspace)
+        state = virtual_workspace.start(
+            video_mode.width,
+            video_mode.height,
+            args.workspace,
+            args.placement,
+        )
         try:
             virtual_workspace.arm_auto_picker(args.workspace)
             guard_process = subprocess.Popen(
@@ -1509,6 +1514,7 @@ def run_cast_live(args: argparse.Namespace) -> int:
                     "event": "virtual-workspace-started",
                     "output": state["output"],
                     "workspace": state["selected_workspace"],
+                    "placement": state["placement"],
                     "width": state["width"],
                     "height": state["height"],
                 },
@@ -1719,6 +1725,7 @@ def cast_session_snapshot() -> dict[str, Any]:
         "address": str(state.get("address", "")),
         "receiver": str(state.get("receiver", "")),
         "workspace": str(state.get("workspace", "")),
+        "placement": str(state.get("placement", "right")),
         "video_frames": int(metrics.get("video_frames", 0) or 0),
         "audio_buffers": int(metrics.get("audio_buffers", 0) or 0),
         "bitrate_bps": int(metrics.get("bitrate_bps", 0) or 0),
@@ -1745,6 +1752,7 @@ def cast_live_command(args: argparse.Namespace) -> list[str]:
     ]
     if args.workspace:
         command.extend(["--workspace", args.workspace])
+        command.extend(["--placement", args.placement])
     if args.keep_local_audio:
         command.append("--keep-local-audio")
     if args.ipc_target:
@@ -1850,6 +1858,7 @@ def run_session_start(args: argparse.Namespace) -> int:
             "address": args.address,
             "receiver": args.receiver_name or args.address,
             "workspace": args.workspace or "",
+            "placement": args.placement,
             "stop_requested": False,
         }
         atomic_json(cast_session_path("cast-session.json"), state)
@@ -1981,6 +1990,12 @@ def add_cast_arguments(parser: argparse.ArgumentParser, *, detached: bool = Fals
     parser.add_argument(
         "--workspace",
         help="capture this workspace on a dedicated virtual output",
+    )
+    parser.add_argument(
+        "--placement",
+        choices=("left", "above", "below", "right"),
+        default="right",
+        help="place the virtual display at this edge of the local display",
     )
     parser.add_argument(
         "--keep-local-audio",
