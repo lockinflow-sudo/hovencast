@@ -1136,26 +1136,6 @@ Panel {
                       && root.sourcePickerPage === "windows"
                   }
 
-                  Rectangle {
-                    visible: sourceWindowCard.selected
-                    anchors.top: parent.top
-                    anchors.right: parent.right
-                    anchors.topMargin: Style.space(7)
-                    anchors.rightMargin: Style.space(7)
-                    implicitWidth: Style.space(24)
-                    implicitHeight: Style.space(24)
-                    color: root.urgent
-
-                    Text {
-                      anchors.centerIn: parent
-                      text: "✓"
-                      color: Color.popups.background
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.body
-                      font.bold: true
-                    }
-                  }
-
                   Column {
                     id: windowLabels
                     anchors.left: parent.left
