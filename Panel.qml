@@ -597,8 +597,6 @@ Panel {
     Rectangle {
       anchors.fill: parent
       color: Qt.alpha(root.foreground, 0.06)
-      border.width: 1
-      border.color: Qt.alpha(root.foreground, 0.32)
     }
 
     clip: true
@@ -1338,7 +1336,10 @@ Panel {
 
                 WorkspacePreview {
                   anchors.fill: parent
-                  anchors.margins: Style.space(8)
+                  anchors.topMargin: Border.top(workspaceChoice.borderSpec)
+                  anchors.rightMargin: Border.right(workspaceChoice.borderSpec)
+                  anchors.bottomMargin: Border.bottom(workspaceChoice.borderSpec)
+                  anchors.leftMargin: Border.left(workspaceChoice.borderSpec)
                   workspaceName: String(workspaceChoice.modelData.name)
                   live: root.opened && root.sourceMode === "workspace"
                 }
