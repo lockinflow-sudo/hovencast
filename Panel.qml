@@ -1245,7 +1245,7 @@ Panel {
 
           CastSectionHeader {
             width: parent.width
-            text: "CAST SOURCE"
+            text: "CAST MODE"
             foreground: root.foreground
             fontFamily: root.fontFamily
           }
@@ -1265,7 +1265,7 @@ Panel {
                 : Border.controlSpec("normal", foreground, accent)
               Text {
                 anchors.centerIn: parent
-                text: "Virtual workspace"
+                text: "Extend Display"
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
@@ -1288,7 +1288,7 @@ Panel {
                 : Border.controlSpec("normal", foreground, accent)
               Text {
                 anchors.centerIn: parent
-                text: "Application window"
+                text: "Share Screen"
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
@@ -1302,11 +1302,13 @@ Panel {
           }
 
           Text {
-            visible: root.sourceMode === "workspace"
+            visible: true
             width: parent.width
-            text: root.sessionState === "streaming"
-              ? "Choose another workspace without reconnecting the TV."
-              : "The selected workspace gets a dedicated 1280 × 720 TV display."
+            text: root.sourceMode === "workspace"
+              ? (root.sessionState === "streaming"
+                ? "Choose another workspace without reconnecting the TV."
+                : "Put a workspace on a dedicated wireless display.")
+              : "Share a workspace, application window, or selected area."
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
