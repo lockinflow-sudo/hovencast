@@ -1536,7 +1536,6 @@ Panel {
 
             CastSurface {
               id: compactPlacementButton
-              visible: root.sourceMode === "workspace"
               Layout.fillWidth: true
               implicitHeight: Style.space(58)
               bordered: true
@@ -1594,7 +1593,7 @@ Panel {
           }
 
           RowLayout {
-            visible: root.sourceMode === "workspace" && root.displayPlacementMenuOpen
+            visible: root.displayPlacementMenuOpen
             width: parent.width
             spacing: Style.space(8)
 
