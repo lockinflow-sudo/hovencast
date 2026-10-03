@@ -1479,6 +1479,9 @@ def run_discover(_args: argparse.Namespace) -> int:
 
 
 def run_source_list(_args: argparse.Namespace) -> int:
+    source_root = runtime_root()
+    if source_root is not None:
+        (source_root / "share-source-preview.png").unlink(missing_ok=True)
     monitors_result = subprocess.run(
         ["hyprctl", "-j", "monitors"],
         check=True,

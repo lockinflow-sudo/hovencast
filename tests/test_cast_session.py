@@ -1,6 +1,8 @@
 #!/usr/bin/python
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import pathlib
@@ -17,6 +19,7 @@ from omarchy_cast import (  # noqa: E402
     cast_live_command,
     cast_session_snapshot,
     process_start_ticks,
+    run_source_list,
     run_session_runner,
     run_session_start,
     session_runner_command,
@@ -47,6 +50,42 @@ def arguments(**overrides: object) -> argparse.Namespace:
 
 
 class CastSessionTest(unittest.TestCase):
+    @mock.patch("omarchy_cast.subprocess.run")
+    def test_source_list_removes_the_legacy_desktop_preview(
+        self, run: mock.Mock
+    ) -> None:
+        run.side_effect = [
+            subprocess.CompletedProcess(
+                [],
+                0,
+                stdout=json.dumps(
+                    [
+                        {
+                            "id": 0,
+                            "name": "eDP-1",
+                            "description": "Built-in display",
+                            "width": 1920,
+                            "height": 1200,
+                            "focused": True,
+                        }
+                    ]
+                ),
+            ),
+            subprocess.CompletedProcess([], 0, stdout="[]"),
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime = pathlib.Path(temporary)
+            legacy = runtime / "hovencast/share-source-preview.png"
+            legacy.parent.mkdir()
+            legacy.write_bytes(b"old preview")
+            output = io.StringIO()
+            with mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(runtime)}):
+                with contextlib.redirect_stdout(output):
+                    self.assertEqual(run_source_list(argparse.Namespace()), 0)
+
+            self.assertFalse(legacy.exists())
+            self.assertEqual(json.loads(output.getvalue())["preview"], "")
+
     def test_command_preserves_workspace_and_picker_target(self) -> None:
         command = cast_live_command(arguments())
 
