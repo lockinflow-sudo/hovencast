@@ -58,6 +58,6 @@
 - [x] Route audio with its application window between laptop and TV workspaces.
 - [x] Gracefully end the MICE projection so the receiver accepts the next session.
 - [x] Rebuild the native sender automatically when its source changes.
-- [ ] Pass a clean-install test from a fresh clone.
+- [x] Pass a clean-install test from a fresh clone.
 - [ ] Pass five consecutive stop/start cycles against the TCL Roku 32S331.
 - [ ] Install or publish the updated plugin only after explicit owner approval.
