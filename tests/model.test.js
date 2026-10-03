@@ -1,6 +1,29 @@
 const assert = require("node:assert/strict")
+const fs = require("node:fs")
+const path = require("node:path")
 const model = require("../Model.js")
 const manifest = require("../manifest.json")
+
+function qmlObjectBlock(source, type, id) {
+  const marker = `${type} {`
+  let start = source.indexOf(marker)
+  while (start !== -1) {
+    let depth = 0
+    for (let index = start; index < source.length; index++) {
+      if (source[index] === "{") depth++
+      if (source[index] === "}") {
+        depth--
+        if (depth === 0) {
+          const block = source.slice(start, index + 1)
+          if (new RegExp(`\\bid\\s*:\\s*${id}\\b`).test(block)) return block
+          break
+        }
+      }
+    }
+    start = source.indexOf(marker, start + marker.length)
+  }
+  throw new Error(`Could not find ${type} object with id ${id}`)
+}
 
 assert.equal(model.version(), manifest.version)
 
@@ -49,13 +72,21 @@ const shareSources = model.parseShareSources(JSON.stringify({
     handle: "0x1234",
     address: "0x1234",
     appClass: "chatgpt",
-    title: "HovenCast frontend chat",
+    title: '<img src="https://example.invalid/window-title-probe">',
     output: "eDP-1"
   }]
 }))
 assert.equal(shareSources.output, "eDP-1")
 assert.equal(shareSources.windows.length, 1)
-assert.equal(shareSources.windows[0].title, "HovenCast frontend chat")
+assert.equal(
+  shareSources.windows[0].title,
+  '<img src="https://example.invalid/window-title-probe">'
+)
+
+const panelSource = fs.readFileSync(path.join(__dirname, "..", "Panel.qml"), "utf8")
+assert.match(qmlObjectBlock(panelSource, "Text", "applicationNameLabel"), /textFormat:\s*Text\.PlainText/)
+assert.match(qmlObjectBlock(panelSource, "Text", "windowDescription"), /textFormat:\s*Text\.PlainText/)
+
 assert.equal(model.displayName("eDP-1", "BOE panel"), "Built-in display")
 assert.equal(model.displayName("HDMI-A-1", "Living Room Display"), "Living Room Display")
 assert.equal(model.protocolLabel("miracast-mice"), "MIRACAST · LOCAL NETWORK")

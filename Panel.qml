@@ -1366,6 +1366,7 @@ Panel {
                     anchors.leftMargin: Style.space(10)
                     anchors.rightMargin: Style.space(10)
                     text: sourceWindowCard.applicationName
+                    textFormat: Text.PlainText
                     color: root.foreground
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.bodySmall
@@ -1397,6 +1398,7 @@ Panel {
                     anchors.topMargin: Style.space(7)
                     height: sourceWindowGrid.uniformDescriptionHeight
                     text: String(sourceWindowCard.modelData.title || "Application window")
+                    textFormat: Text.PlainText
                     color: root.dim
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.bodySmall
