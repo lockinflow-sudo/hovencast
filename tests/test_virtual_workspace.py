@@ -13,8 +13,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 from virtual_workspace import (  # noqa: E402
     Focus,
     VirtualWorkspace,
+    _process_start_ticks,
     _safe_placement,
     _safe_workspace,
+    _state_process_is_running,
 )
 
 
@@ -47,6 +49,7 @@ class VirtualWorkspaceTest(unittest.TestCase):
         state: dict[str, object] = {
             "version": 1,
             "pid": os.getpid(),
+            "start_ticks": _process_start_ticks(os.getpid()),
             "output": self.manager.output,
             "width": 1280,
             "height": 720,
@@ -70,6 +73,20 @@ class VirtualWorkspaceTest(unittest.TestCase):
             self.assertEqual(_safe_placement(placement), placement)
         with self.assertRaises(ValueError):
             _safe_placement("diagonal")
+
+    def test_process_identity_rejects_a_reused_pid(self) -> None:
+        state = {
+            "pid": os.getpid(),
+            "start_ticks": (_process_start_ticks(os.getpid()) or 0) + 1,
+        }
+        self.assertFalse(_state_process_is_running(state))
+
+    def test_process_identity_accepts_the_current_process(self) -> None:
+        state = {
+            "pid": os.getpid(),
+            "start_ticks": _process_start_ticks(os.getpid()),
+        }
+        self.assertTrue(_state_process_is_running(state))
 
     def test_start_creates_a_tv_sized_headless_output(self) -> None:
         commands: list[list[str]] = []

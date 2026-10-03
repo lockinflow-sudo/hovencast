@@ -1521,16 +1521,6 @@ def run_source_list(_args: argparse.Namespace) -> int:
                     "output": monitor_names.get(int(client.get("monitor", -1)), output),
                 }
             )
-    source_root = runtime_root(required=True)
-    assert source_root is not None
-    preview = source_root / "share-source-preview.png"
-    preview.unlink(missing_ok=True)
-    result = subprocess.run(
-        ["grim", "-o", output, "-s", "0.25", str(preview)],
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
     print(
         json.dumps(
             {
@@ -1538,7 +1528,7 @@ def run_source_list(_args: argparse.Namespace) -> int:
                 "description": str(focused.get("description", "")),
                 "width": int(focused.get("width", 0) or 0),
                 "height": int(focused.get("height", 0) or 0),
-                "preview": str(preview) if result.returncode == 0 else "",
+                "preview": "",
                 "windows": windows,
             },
             sort_keys=True,
@@ -1634,6 +1624,8 @@ def run_cast_live(args: argparse.Namespace) -> int:
                     "workspace-guard",
                     "--pid",
                     str(os.getpid()),
+                    "--start-ticks",
+                    str(state["start_ticks"]),
                 ],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
@@ -2122,7 +2114,7 @@ def run_workspace_control(args: argparse.Namespace) -> int:
 
 
 def run_workspace_guard(args: argparse.Namespace) -> int:
-    return guard(args.pid)
+    return guard(args.pid, args.start_ticks)
 
 
 def add_cast_arguments(parser: argparse.ArgumentParser, *, detached: bool = False) -> None:
@@ -2216,6 +2208,7 @@ def build_parser() -> argparse.ArgumentParser:
     workspace.set_defaults(func=run_workspace_control)
     workspace_guard = subparsers.add_parser("workspace-guard", help=argparse.SUPPRESS)
     workspace_guard.add_argument("--pid", type=int, required=True)
+    workspace_guard.add_argument("--start-ticks", type=int, required=True)
     workspace_guard.set_defaults(func=run_workspace_guard)
     return parser
 

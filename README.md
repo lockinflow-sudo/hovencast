@@ -1,14 +1,21 @@
 # HovenCast
 
 HovenCast is an Omarchy bar plugin that turns a compatible Roku TV into a
-wireless Hyprland workspace. It can also share one application window, with
-desktop audio, over the same local network.
+wireless Hyprland display. It can place a workspace on a dedicated TV display,
+or share a desktop, application window, or selected area with desktop audio
+over the same local network.
 
 Version 0.2.0 uses Miracast over Infrastructure (MICE). It has been physically
 tested with TCL Roku models 32S331, 55S405, and 65S451. Other Roku TVs that
 advertise MICE and provide valid Roku device information are shown as
 compatible candidates, but still need community testing. Fire TV, Wi-Fi
 Direct, Google Cast, AirPlay, and non-Roku receivers are not supported.
+
+## Screenshots
+
+| Extend Display | Share Screen |
+| --- | --- |
+| <img src="docs/screenshots/extend-display.png" alt="HovenCast Extend Display mode" width="420"> | <img src="docs/screenshots/share-screen.png" alt="HovenCast Share Screen mode" width="420"> |
 
 ## Requirements
 
@@ -43,42 +50,77 @@ Setup changes only `custom_picker_binary`; it preserves your existing
 
 ## Use
 
-1. Click the cast icon in the Omarchy bar.
-2. Choose **Virtual workspace** and the Hyprland workspace to show, or choose
-   **Application window**.
-3. Choose a discovered Roku TV and approve the sender on the TV if prompted.
-4. While workspace casting, choose another workspace at any time. The Roku
-   connection and encoder keep running against the same virtual display.
-5. Right-click the bar icon to stop.
+Click the cast icon in the Omarchy bar. HovenCast searches for compatible Roku
+TVs on the local network. Hover over a TV to see its network address and
+connection type, then choose one after selecting the content you want to show.
+Approve the sender on the TV when Roku asks.
 
-The virtual TV output uses the receiver's supported video mode (1280 × 720 for
-the TCL Roku 32S331) at scale 1, so applications receive a genuine TV-sized
-fullscreen layout without changing the laptop display. A workspace is visible
-on only one output. If the laptop's visible workspace is sent to the TV,
-HovenCast first switches the laptop to another workspace.
+### Extend Display
 
-Use the compact **TV position** control to place the wireless display to the
-left, above, below, or right of the active local display. Hyprland then lets the
-pointer cross the matching screen edge. The selected placement is remembered
-for later sessions.
+**Extend Display** gives the TV its own Hyprland output and puts one normal
+workspace on it. The TV is an additional desktop rather than a copy of the
+laptop screen.
 
-Use the widget's **Control TV** and **Return to laptop** actions for mouse and
-keyboard focus. Omarchy's existing **Ctrl+Alt+Tab** and
-**Ctrl+Alt+Shift+Tab** monitor-focus shortcuts also move between the laptop and
-TV, including when the widget is no longer focused.
+1. Open **TV placement** and choose **Left**, **Above**, **Below**, or **Right**
+   to match the TV's physical location.
+2. Select one of the live workspace previews.
+3. Select a Roku TV from **Available Displays**.
+4. Move the pointer through the matching laptop edge to enter the TV. For
+   example, a TV set to **Above** is reached through the top edge only.
 
-During virtual-workspace casting, audio follows its application window between
-the laptop and TV workspaces. During application-window casting, audio moves to
-the TV for the session. Enable **Keep audio on this computer** in the widget
-settings to keep audio local while also sending it to the TV. HovenCast restores
-the previous audio sink and workspace layout on normal stop. A detached guard
-restores the workspaces and removes the headless output if the casting backend
-crashes; the next HovenCast command also recovers stale state.
+The selected workspace becomes the TV workspace. Use Omarchy's normal
+**Super+Shift+number** shortcut to move the active window to that workspace, or
+**Super+Shift+Alt+number** to move it there without following it. Move the
+window to a laptop workspace to bring it back. HovenCast first switches the
+laptop to a fallback workspace if the selected TV workspace was visible there.
 
-Window sharing captures the selected monitor and crops it to the chosen window,
-following that window as its geometry changes. Keep private windows off that
-monitor while sharing. The portal picker is system-wide while HovenCast is
-installed, so it also appears for screen-sharing requests from other apps.
+While casting, select another workspace preview to change the workspace shown
+on the TV without reconnecting. **Control TV** focuses the TV display and
+**Return to laptop** restores laptop focus. Omarchy's **Ctrl+Alt+Tab** and
+**Ctrl+Alt+Shift+Tab** monitor shortcuts provide the same controls even after
+the panel closes.
+
+The virtual output uses the receiver's supported mode, including 1280 × 720 on
+the TCL Roku 32S331, at scale 1. Applications therefore receive a real TV-sized
+fullscreen layout without changing the laptop display. The selected placement
+is saved for later sessions.
+
+### Share Screen
+
+**Share Screen** sends existing laptop content to the TV without creating a
+second desktop. Choose the source first, then choose a Roku TV:
+
+- **Desktop** shares the active display.
+- **Window** opens a visual picker with live application thumbnails. Select a
+  window, return to the main panel, and choose a TV. HovenCast follows the
+  window as it moves or changes size.
+- **Selection** opens the area selector. Drag over the part of the screen to
+  share, then choose a TV when the HovenCast panel returns.
+
+**TV placement** remains available in Share Screen so it can be set before the
+next Extend Display session. Screen sharing mirrors selected content and does
+not create another pointer destination.
+
+Window sharing captures the selected monitor and crops the outgoing video to
+the chosen window. Other content on that monitor is processed locally even
+though it is outside the transmitted crop, so keep sensitive windows on a
+different monitor when needed. The HovenCast portal picker is system-wide while
+the plugin is installed and can also appear for screen-sharing requests from
+other applications.
+
+### Audio, status, and stopping
+
+With **Audio on computer** off, Extend Display sends audio from applications on
+the TV workspace to the TV, while Share Screen sends session audio to the TV.
+Turn it on before connecting to hear the same audio on the computer and TV.
+The status header shows connection progress, the active TV, and the live
+bitrate; streaming details appear near the bottom of the panel.
+
+Right-click the HovenCast bar icon to stop, or reopen the panel and use the stop
+button in the header. HovenCast restores the prior audio sink, workspace
+placement, and focus after a normal stop. A detached guard restores the
+workspace and removes the virtual output if the backend crashes, and the next
+HovenCast command also recovers stale state.
 
 The workspace controller is also available from a terminal:
 
@@ -112,9 +154,10 @@ restore state is kept outside the plugin directory.
 HovenCast streams directly to the selected TV on the local network and does not
 upload the capture. Its RTSP listener binds only to the receiver-facing local
 address and rejects connections not originating from the selected TV. It does
-not save screen recordings. The picker preview is deleted as soon as selection
-ends. A small newline-delimited diagnostic event log is replaced for each
-session under `$XDG_RUNTIME_DIR/hovencast/` and normally disappears at logout.
+not save screen recordings. Any portal picker preview is deleted as soon as
+selection ends. A small newline-delimited diagnostic event log is replaced for
+each session under `$XDG_RUNTIME_DIR/hovencast/` and normally disappears at
+logout.
 
 See [SECURITY.md](SECURITY.md) for the trust model, residual risks, and private
 reporting guidance.
@@ -158,8 +201,8 @@ qmllint -I "$OMARCHY_PATH/shell" Panel.qml
 
 The repository intentionally ignores local builds, Python caches, event logs,
 and transport streams.
-The marketplace preview is based on the live panel, with its local network
-address redacted.
+The marketplace preview uses synthetic receiver data and contains no private
+network addresses or personal desktop content.
 
 ## License
 

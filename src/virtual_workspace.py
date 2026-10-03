@@ -39,6 +39,25 @@ def _process_is_running(pid: int) -> bool:
         return True
 
 
+def _process_start_ticks(pid: int) -> int | None:
+    try:
+        suffix = pathlib.Path(f"/proc/{pid}/stat").read_text(
+            encoding="utf-8"
+        ).rsplit(")", 1)[1]
+        return int(suffix.split()[19])
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _state_process_is_running(state: dict[str, Any]) -> bool:
+    try:
+        pid = int(state["pid"])
+        expected_ticks = int(state["start_ticks"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return _process_is_running(pid) and _process_start_ticks(pid) == expected_ticks
+
+
 def _safe_workspace(value: Any) -> str:
     workspace = str(value or "").strip()
     if not workspace or len(workspace) > 128:
@@ -216,6 +235,9 @@ class VirtualWorkspace:
     ) -> dict[str, Any]:
         workspace = _safe_workspace(workspace)
         placement = _safe_placement(placement)
+        start_ticks = _process_start_ticks(os.getpid())
+        if start_ticks is None:
+            raise RuntimeError("HovenCast could not identify the casting process")
         with self.locked():
             self.recover_stale(lock_held=True)
             monitors = self.monitors()
@@ -271,6 +293,7 @@ class VirtualWorkspace:
                 state: dict[str, Any] = {
                     "version": STATE_VERSION,
                     "pid": os.getpid(),
+                    "start_ticks": start_ticks,
                     "output": self.output,
                     "width": width,
                     "height": height,
@@ -390,7 +413,7 @@ class VirtualWorkspace:
     def switch(self, workspace: str) -> dict[str, Any]:
         with self.locked():
             state = self._read_state()
-            if not _process_is_running(int(state.get("pid", 0))):
+            if not _state_process_is_running(state):
                 self.recover_stale(lock_held=True)
                 raise RuntimeError("The HovenCast session is no longer running")
             return self._switch_locked(workspace)
@@ -463,7 +486,7 @@ class VirtualWorkspace:
             return False
         try:
             state = self._read_state()
-            if _process_is_running(int(state.get("pid", 0))):
+            if _state_process_is_running(state):
                 return False
         except RuntimeError:
             pass
@@ -504,16 +527,25 @@ class VirtualWorkspace:
     def status(self) -> dict[str, Any]:
         with self.locked():
             state = self._read_state()
-            state["running"] = _process_is_running(int(state.get("pid", 0)))
+            state["running"] = _state_process_is_running(state)
             return state
 
 
-def guard(parent_pid: int, poll_seconds: float = 0.5) -> int:
+def guard(
+    parent_pid: int,
+    parent_start_ticks: int | None = None,
+    poll_seconds: float = 0.5,
+) -> int:
     manager = VirtualWorkspace()
+    if parent_start_ticks is None:
+        parent_start_ticks = _process_start_ticks(parent_pid)
     while True:
         if not manager.state_path.is_file():
             return 0
-        if not _process_is_running(parent_pid):
+        if (
+            not _process_is_running(parent_pid)
+            or _process_start_ticks(parent_pid) != parent_start_ticks
+        ):
             manager.recover_stale()
             return 0
         time.sleep(poll_seconds)

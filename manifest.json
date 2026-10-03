@@ -5,7 +5,7 @@
   "version": "0.2.0",
   "author": "Sean Hovenkamp",
   "license": "MIT",
-  "description": "Cast a dedicated Hyprland workspace or application window with audio to compatible Roku TVs.",
+  "description": "Extend Omarchy with a dedicated workspace or share a desktop, window, or selected area with compatible Roku TVs.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,18 +14,19 @@
   },
   "barWidget": {
     "displayName": "HovenCast",
-    "description": "Use a Roku TV as a wireless Hyprland workspace.",
+    "description": "Extend your display or share selected screen content with a compatible Roku TV.",
     "category": "Network",
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "keepLocalAudio": false
+      "keepLocalAudio": false,
+      "displayPlacement": "right"
     },
     "schema": [
       {
         "key": "keepLocalAudio",
         "type": "boolean",
-        "label": "Keep audio on this computer",
+        "label": "Audio on computer",
         "defaultValue": false
       }
     ]
