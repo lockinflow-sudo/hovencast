@@ -436,6 +436,42 @@ class VirtualWorkspace:
         with self.locked():
             self._stop_locked()
 
+    def _wait_cleanup_ready(
+        self,
+        restore: Focus,
+        timeout_seconds: float = 3.0,
+    ) -> None:
+        """Wait until the output is gone and Hyprland has restored focus."""
+        deadline = time.monotonic() + timeout_seconds
+        stable_samples = 0
+        while time.monotonic() < deadline:
+            monitors = self.monitors()
+            output_present = any(
+                str(item.get("name", "")) == self.output for item in monitors
+            )
+            focused = next((item for item in monitors if item.get("focused")), None)
+            active = (focused or {}).get("activeWorkspace") or {}
+            focus_ready = bool(
+                focused
+                and str(focused.get("name", "")) == restore.monitor
+                and (
+                    not restore.workspace
+                    or str(active.get("name", "")) == restore.workspace
+                )
+            )
+            if not output_present and focus_ready:
+                stable_samples += 1
+                if stable_samples >= 2:
+                    return
+            else:
+                stable_samples = 0
+                if not output_present:
+                    self._restore_focus(restore)
+            time.sleep(0.05)
+        raise RuntimeError(
+            f"Hyprland did not finish removing {self.output} and restoring focus"
+        )
+
     def _stop_locked(self) -> None:
         if not self.state_path.is_file():
             return
@@ -469,6 +505,10 @@ class VirtualWorkspace:
                 self._command(["hyprctl", "output", "remove", self.output])
             except (OSError, subprocess.SubprocessError) as error:
                 errors.append(f"could not remove {self.output}: {error}")
+        try:
+            self._wait_cleanup_ready(restore)
+        except (OSError, ValueError, json.JSONDecodeError, subprocess.SubprocessError, RuntimeError) as error:
+            errors.append(f"could not finish display cleanup: {error}")
         remaining = {str(item.get("name", "")) for item in self.monitors()}
         if self.output not in remaining and not errors:
             self.state_path.unlink(missing_ok=True)

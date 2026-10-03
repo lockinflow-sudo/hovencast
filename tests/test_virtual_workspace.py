@@ -210,6 +210,34 @@ class VirtualWorkspaceTest(unittest.TestCase):
 
         self.assertEqual(self.manager.monitors.call_count, 2)
 
+    @mock.patch("virtual_workspace.time.sleep")
+    def test_cleanup_waits_for_output_removal_and_restored_focus(
+        self, _sleep: mock.Mock
+    ) -> None:
+        self.manager.monitors = mock.Mock(
+            side_effect=[
+                [
+                    PHYSICAL_MONITOR,
+                    {
+                        "name": "HovenCast-TV",
+                        "focused": False,
+                        "activeWorkspace": {"name": "1"},
+                    },
+                ],
+                [{**PHYSICAL_MONITOR, "activeWorkspace": {"name": "2"}}],
+                [{**PHYSICAL_MONITOR, "activeWorkspace": {"name": "1"}}],
+                [{**PHYSICAL_MONITOR, "activeWorkspace": {"name": "1"}}],
+            ]
+        )
+        self.manager._restore_focus = mock.Mock()
+
+        self.manager._wait_cleanup_ready(
+            Focus("eDP-1", "1"), timeout_seconds=1.0
+        )
+
+        self.manager._restore_focus.assert_called_once_with(Focus("eDP-1", "1"))
+        self.assertEqual(self.manager.monitors.call_count, 4)
+
     def test_switch_moves_an_active_laptop_workspace_after_showing_fallback(self) -> None:
         self.write_state()
         self.manager.focus = mock.Mock(return_value=Focus("eDP-1", "1"))
