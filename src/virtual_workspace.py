@@ -439,7 +439,7 @@ class VirtualWorkspace:
     def _wait_cleanup_ready(
         self,
         restore: Focus,
-        timeout_seconds: float = 3.0,
+        timeout_seconds: float = 5.0,
     ) -> None:
         """Wait until the output is gone and Hyprland has restored focus."""
         deadline = time.monotonic() + timeout_seconds
@@ -461,7 +461,7 @@ class VirtualWorkspace:
             )
             if not output_present and focus_ready:
                 stable_samples += 1
-                if stable_samples >= 2:
+                if stable_samples >= 10:
                     return
             else:
                 stable_samples = 0

@@ -225,8 +225,10 @@ class VirtualWorkspaceTest(unittest.TestCase):
                     },
                 ],
                 [{**PHYSICAL_MONITOR, "activeWorkspace": {"name": "2"}}],
-                [{**PHYSICAL_MONITOR, "activeWorkspace": {"name": "1"}}],
-                [{**PHYSICAL_MONITOR, "activeWorkspace": {"name": "1"}}],
+                *[
+                    [{**PHYSICAL_MONITOR, "activeWorkspace": {"name": "1"}}]
+                    for _ in range(10)
+                ],
             ]
         )
         self.manager._restore_focus = mock.Mock()
@@ -236,7 +238,7 @@ class VirtualWorkspaceTest(unittest.TestCase):
         )
 
         self.manager._restore_focus.assert_called_once_with(Focus("eDP-1", "1"))
-        self.assertEqual(self.manager.monitors.call_count, 4)
+        self.assertEqual(self.manager.monitors.call_count, 12)
 
     def test_switch_moves_an_active_laptop_workspace_after_showing_fallback(self) -> None:
         self.write_state()
