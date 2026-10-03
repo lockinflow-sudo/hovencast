@@ -29,7 +29,11 @@ assert.equal(model.version(), manifest.version)
 
 const discovery = model.parseDiscovery(JSON.stringify({
   receivers: [
-    { name: "Living Room", address: "192.168.1.20", protocol: "miracast-mice" },
+    {
+      name: '<img src="https://example.invalid/receiver-name-probe">',
+      address: "192.168.1.20",
+      protocol: "miracast-mice"
+    },
     { name: "Duplicate", address: "192.168.1.20", protocol: "miracast-mice" },
     { name: "Bedroom", address: "192.168.1.21", protocol: "miracast-mice" }
   ]
@@ -37,7 +41,10 @@ const discovery = model.parseDiscovery(JSON.stringify({
 
 assert.equal(discovery.error, "")
 assert.equal(discovery.receivers.length, 2)
-assert.equal(discovery.receivers[0].name, "Living Room")
+assert.equal(
+  discovery.receivers[0].name,
+  '<img src="https://example.invalid/receiver-name-probe">'
+)
 assert.equal(discovery.receivers[1].address, "192.168.1.21")
 
 assert.equal(model.parseDiscovery("not json").receivers.length, 0)
@@ -86,6 +93,8 @@ assert.equal(
 const panelSource = fs.readFileSync(path.join(__dirname, "..", "Panel.qml"), "utf8")
 assert.match(qmlObjectBlock(panelSource, "Text", "applicationNameLabel"), /textFormat:\s*Text\.PlainText/)
 assert.match(qmlObjectBlock(panelSource, "Text", "windowDescription"), /textFormat:\s*Text\.PlainText/)
+assert.match(qmlObjectBlock(panelSource, "Text", "receiverNameLabel"), /textFormat:\s*Text\.PlainText/)
+assert.match(qmlObjectBlock(panelSource, "Text", "receiverAddressLabel"), /textFormat:\s*Text\.PlainText/)
 
 assert.equal(model.displayName("eDP-1", "BOE panel"), "Built-in display")
 assert.equal(model.displayName("HDMI-A-1", "Living Room Display"), "Living Room Display")

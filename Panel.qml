@@ -2071,8 +2071,10 @@ Panel {
                     spacing: Style.space(4)
 
                     Text {
+                      id: receiverNameLabel
                       Layout.fillWidth: true
                       text: String(receiverRow.modelData.name || receiverRow.modelData.address)
+                      textFormat: Text.PlainText
                       color: root.foreground
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.body
@@ -2084,6 +2086,7 @@ Panel {
                       text: Model.protocolName(receiverRow.modelData.protocol)
                         + (Model.resolutionLabel(receiverRow.modelData) !== ""
                           ? " · " + Model.resolutionLabel(receiverRow.modelData) : "")
+                      textFormat: Text.PlainText
                       color: root.dim
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.caption
@@ -2123,6 +2126,7 @@ Panel {
 
                   Text {
                     text: "NETWORK ADDRESS"
+                    textFormat: Text.PlainText
                     color: root.dim
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption
@@ -2131,8 +2135,10 @@ Panel {
                   }
 
                   Text {
+                    id: receiverAddressLabel
                     Layout.fillWidth: true
                     text: String(receiverRow.modelData.address || "")
+                    textFormat: Text.PlainText
                     color: root.foreground
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption
@@ -2142,6 +2148,7 @@ Panel {
 
                   Text {
                     text: "CONNECTION"
+                    textFormat: Text.PlainText
                     color: root.dim
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption
@@ -2152,6 +2159,7 @@ Panel {
                   Text {
                     Layout.fillWidth: true
                     text: Model.connectionLabel(receiverRow.modelData.protocol)
+                    textFormat: Text.PlainText
                     color: root.foreground
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption
