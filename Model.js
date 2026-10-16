@@ -1,7 +1,8 @@
 function setupLaunchCommand(setupPath) {
-  return ["omarchy", "launch", "terminal", "-e", "bash", "-c",
-    '"$1"; result=$?; printf "\\nPress Enter to close…"; read -r </dev/tty 2>/dev/null || true; exit "$result"',
-    "hovencast-setup", String(setupPath)]
+  var path = String(setupPath)
+  var directory = path.slice(0, path.lastIndexOf("/"))
+  return ["omarchy", "launch", "terminal", "-e", "bash",
+    directory + "/scripts/setup_terminal.sh", path]
 }
 
 function parseSetup(raw) {

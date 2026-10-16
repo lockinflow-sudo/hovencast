@@ -879,6 +879,7 @@ Panel {
     function refresh(): string { root.refresh(); return "ok" }
     function stop(): string { root.stopCasting(); return "ok" }
     function status(): string { return root.statusJson() }
+    function setup(): void { root.launchSetup() }
     function pickerOpen(output: string, description: string, width: string,
                         height: string, previewPath: string, windowsB64: string): string {
       return root.openSourcePicker(output, description, width, height, previewPath, windowsB64)
