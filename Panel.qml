@@ -126,19 +126,19 @@ Panel {
   }
 
   function launchReceiverSetup(script) {
-    if (sessionActive || setupLaunchProc.running) return
+    if (sessionActive) return
     root.close()
-    setupLaunchProc.command = Model.setupLaunchCommand(Model.localPath(Qt.resolvedUrl(script)))
-    setupLaunchProc.running = true
+    Quickshell.execDetached(Model.setupLaunchCommand(Model.localPath(Qt.resolvedUrl(script))))
   }
 
   function launchSetup() {
-    if (!setupChecked || setupLaunchProc.running || sessionActive) return
+    if (!setupChecked || sessionActive) return
     // Release the popup keyboard grab before opening an interactive terminal.
     root.close()
     // Pass the local path as an argument, never interpolate it into shell code.
-    setupLaunchProc.command = Model.setupLaunchCommand(setupCommand)
-    setupLaunchProc.running = true
+    // Building the helper changes plugin files and triggers an Omarchy reload.
+    // Setup must outlive this QML object and its owned Process instances.
+    Quickshell.execDetached(Model.setupLaunchCommand(setupCommand))
   }
 
   function refresh() {
@@ -614,11 +614,6 @@ Panel {
     repeat: true
     running: root.opened && !root.setupReady
     onTriggered: root.checkSetup()
-  }
-
-  Process {
-    id: setupLaunchProc
-    onExited: root.checkSetup()
   }
 
   Process {
@@ -1672,7 +1667,7 @@ Panel {
               implicitHeight: Style.space(48)
               bordered: true
               foreground: root.foreground
-              enabled: root.setupChecked && !setupLaunchProc.running
+              enabled: root.setupChecked
               Text {
                 anchors.centerIn: parent
                 text: root.setupChecked ? "Review and set up" : "Checking setup…"
@@ -2510,7 +2505,7 @@ Panel {
               implicitHeight: Style.space(40)
               bordered: true
               foreground: root.foreground
-              enabled: !root.sessionActive && !setupLaunchProc.running
+              enabled: !root.sessionActive
               Text {
                 anchors.centerIn: parent
                 text: modelData.label
