@@ -49,7 +49,7 @@ elif name == 'gum':
     elif args and args[0] == 'choose': print('right')
     else: sys.exit(1)
 elif name == 'systemctl':
-    if (root/'fail-service').exists(): sys.exit(1)
+    if (root/'fail-service').exists() and any('xdg-desktop-portal' in arg for arg in args): sys.exit(1)
 elif name == 'cc':
     if (root/'fail-build').exists(): sys.exit(1)
     os.execv('/usr/bin/cc', ['/usr/bin/cc', *args])

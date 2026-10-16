@@ -47,3 +47,31 @@ class SetupReadinessTest(unittest.TestCase):
             setup.install('wlan0')
         helper = next(c.args[0] for c in run.call_args_list if 'install-p2p-helper' in ' '.join(c.args[0]))
         self.assertEqual(helper[-2:], ['--wifi-compat-adapter', 'wlan0'])
+
+    def test_compatibility_opt_in_is_applied_when_core_already_ready(self):
+        status = {'ready': True, 'issues': [], 'missing_packages': []}
+        with mock.patch.object(setup, 'readiness', return_value=status), \
+             mock.patch.object(sys.stdin, 'isatty', return_value=True), \
+             mock.patch('builtins.input', return_value='y'), \
+             mock.patch.object(setup, 'run') as run, mock.patch.object(setup, 'configure'):
+            setup.install('wlan0')
+        helper = next(c.args[0] for c in run.call_args_list if 'install-p2p-helper' in ' '.join(c.args[0]))
+        self.assertEqual(helper[-2:], ['--wifi-compat-adapter', 'wlan0'])
+
+    def test_inactive_network_service_stops_before_privileged_install(self):
+        status = {'ready': False, 'issues': ['setup needed'], 'missing_packages': []}
+        calls = []
+        def run(argv, **kwargs):
+            calls.append(argv)
+            if 'NetworkManager.service' in argv:
+                raise subprocess.CalledProcessError(3, argv)
+            return subprocess.CompletedProcess(argv, 0)
+        with mock.patch.object(setup, 'readiness', return_value=status), \
+             mock.patch.object(sys.stdin, 'isatty', return_value=True), \
+             mock.patch('builtins.input', return_value='y'), \
+             mock.patch.object(setup, 'run', side_effect=run), \
+             mock.patch.object(setup, 'configure') as configure:
+            with self.assertRaises(subprocess.CalledProcessError):
+                setup.install()
+        self.assertFalse(any('install-p2p-helper' in ' '.join(c) for c in calls))
+        configure.assert_not_called()

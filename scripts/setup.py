@@ -152,7 +152,7 @@ def configure() -> None:
 
 def install(compat_adapter: str | None = None) -> int:
     status = readiness()
-    if status["ready"]:
+    if status["ready"] and not compat_adapter:
         print("HovenCast is ready. Select a workspace and a supported TV in the bar.")
         return 0
     print("HovenCast — your TV as a second Omarchy monitor\n")
@@ -180,7 +180,9 @@ def install(compat_adapter: str | None = None) -> int:
     for element in ELEMENTS:
         run(["gst-inspect-1.0", element], stdout=subprocess.DEVNULL)
     run(["python", "-c", 'import gi; gi.require_version("Gst", "1.0"); '
-         'gi.require_version("Xdp", "1.0"); from gi.repository import Gst, Xdp'])
+         'gi.require_version("Xdp", "1.0"); gi.require_version("NM", "1.0"); from gi.repository import Gst, Xdp, NM'])
+    run(["systemctl", "is-active", "--quiet", "NetworkManager.service", "avahi-daemon.service"])
+    run(["systemctl", "--user", "is-active", "--quiet", "pipewire.service", "pipewire-pulse.service"])
     run([str(ROOT / "build-backend")])
     helper_args = ["--wifi-compat-adapter", compat_adapter] if compat_adapter else []
     run(["bash", str(ROOT / "scripts/install-p2p-helper"), *helper_args])
