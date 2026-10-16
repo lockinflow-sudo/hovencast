@@ -58,6 +58,11 @@ Setup checks are read-only. A manual terminal entry point is also available:
 ~/.config/omarchy/plugins/hoven.cast/hovencast-setup
 ```
 
+The panel's setup terminal stays open until you press Enter. If setup fails,
+its output is saved privately in
+`${XDG_STATE_HOME:-~/.local/state}/hovencast/last-setup-terminal.log`.
+Keyboard input is not recorded.
+
 For a known Chromecast that mDNS does not find:
 
 ```sh
