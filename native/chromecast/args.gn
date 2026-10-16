@@ -1,0 +1,12 @@
+is_debug = false
+is_clang = false
+use_sysroot = false
+use_custom_libcxx = false
+use_lld = false
+treat_warnings_as_errors = false
+enable_rust = false
+use_perfetto = false
+have_ffmpeg = true
+have_libopus = true
+have_libvpx = true
+libopus_include_dirs = [ "/usr/include/opus" ]

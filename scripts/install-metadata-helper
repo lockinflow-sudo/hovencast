@@ -1,0 +1,13 @@
+#!/usr/bin/bash
+set -euo pipefail
+root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+[[ $# -eq 0 ]] || exit 2
+if [[ $EUID -ne 0 ]]; then
+  exec /usr/bin/pkexec /usr/bin/bash "$root/scripts/install-metadata-helper"
+fi
+/usr/bin/install -D -o root -g root -m 0644 "$root/scripts/read_p2p_metadata.py" /usr/local/libexec/hovencast-metadata-reader.py
+/usr/bin/install -D -o root -g root -m 0755 "$root/scripts/hovencast-metadata-reader" /usr/local/libexec/hovencast-metadata-reader
+/usr/bin/install -D -o root -g root -m 0644 "$root/scripts/org.hovencast.metadata.policy" /usr/share/polkit-1/actions/org.hovencast.metadata.policy
+# Grant last, after all root-owned files are present.
+/usr/bin/install -D -o root -g root -m 0644 "$root/scripts/49-hovencast-metadata.rules" /etc/polkit-1/rules.d/49-hovencast-metadata.rules
+echo "Installed HovenCast's scoped read-only receiver metadata helper."

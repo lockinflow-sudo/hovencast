@@ -1,0 +1,10 @@
+#!/bin/bash
+set -euo pipefail
+root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cast_env="${XDG_DATA_HOME:-$HOME/.local/share}/hovencast/chromecast-venv"
+if [[ ! -x "$cast_env/bin/python" ]]; then
+  python -m venv --system-site-packages "$cast_env"
+fi
+"$cast_env/bin/python" -m pip install 'PyChromecast==14.0.10'
+"$cast_env/bin/python" "$root/scripts/install_chromecast_native.py"
+exec "$cast_env/bin/python" "$root/scripts/chromecast_setup.py" "$@"

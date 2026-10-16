@@ -22,7 +22,121 @@ typedef enum {
 static GMainLoop *main_loop;
 static gboolean receiver_streaming;
 static GInetAddress *expected_receiver_address;
+static GInetAddressMask *p2p_receiver_network;
+static gboolean p2p_peer_connected;
+static gboolean p2p_group_owner;
 static int exit_status;
+static gboolean video_trace_enabled;
+static gint64 video_trace_started;
+static GMutex video_trace_lock;
+
+static gboolean video_trace_active(gint64 now) {
+  g_mutex_lock(&video_trace_lock);
+  if (video_trace_enabled && !video_trace_started)
+    video_trace_started = now;
+  gboolean active = video_trace_enabled && now - video_trace_started < 90 * G_USEC_PER_SEC;
+  g_mutex_unlock(&video_trace_lock);
+  return active;
+}
+
+static gboolean start_live_video_trace(gpointer unused) {
+  (void)unused;
+  g_mutex_lock(&video_trace_lock);
+  video_trace_started = 0;
+  video_trace_enabled = TRUE;
+  g_mutex_unlock(&video_trace_lock);
+  g_print("{\"event\":\"video-trace-started\",\"seconds\":90}\n");
+  return G_SOURCE_CONTINUE;
+}
+
+static void trace_transport_video(GstBuffer *buffer, const char *stage, gboolean rtp) {
+  gint64 now = g_get_monotonic_time();
+  if (!video_trace_active(now))
+    return;
+  GstMapInfo map;
+  if (!gst_buffer_map(buffer, &map, GST_MAP_READ))
+    return;
+  if (rtp && map.size < 12)
+    goto done;
+  gsize offset = rtp ? 12 + 4 * (map.data[0] & 15) : 0;
+  if (offset > map.size)
+    goto done;
+  if (rtp && (map.data[0] & 0x10)) {
+    if (offset + 4 > map.size)
+      goto done;
+    offset += 4 + 4 * (((guint)map.data[offset + 2] << 8) | map.data[offset + 3]);
+  }
+  for (; offset + 188 <= map.size; offset += 188) {
+    const guint8 *ts = map.data + offset;
+    if (ts[0] != 0x47 || !(ts[1] & 0x40) ||
+        (((ts[1] & 31) << 8) | ts[2]) != 256 || !(ts[3] & 0x10))
+      continue;
+    guint header = 4 + ((ts[3] & 0x20) ? 1 + ts[4] : 0);
+    if (header + 14 > 188)
+      continue;
+    const guint8 *pes = ts + header;
+    if (pes[0] || pes[1] || pes[2] != 1 || !(pes[7] & 0x80) || pes[8] < 5)
+      continue;
+    const guint8 *p = pes + 9;
+    guint64 pts = ((guint64)(p[0] & 14) << 29) | ((guint64)p[1] << 22) |
+                  ((guint64)(p[2] & 254) << 14) | ((guint64)p[3] << 7) | (p[4] >> 1);
+    guint payload_start = header + 9 + pes[8];
+    g_autofree char *digest = payload_start + 64 <= 188
+        ? g_compute_checksum_for_data(G_CHECKSUM_SHA256, ts + payload_start, 64) : NULL;
+    g_print("{\"event\":\"video-stage\",\"stage\":\"%s\",\"monotonic_ns\":%"
+            G_GINT64_FORMAT ",\"pts90k\":%" G_GUINT64_FORMAT
+            ",\"payload_sha256\":%s%s%s}\n", stage, now * 1000, pts,
+            digest ? "\"" : "", digest ? digest : "null", digest ? "\"" : "");
+  }
+done:
+  gst_buffer_unmap(buffer, &map);
+}
+
+static void trace_rtp_video(GstBuffer *buffer) {
+  trace_transport_video(buffer, "rtp-packetized", TRUE);
+}
+
+typedef struct {
+  const char *stage;
+  GByteArray *pending;
+} TransportTrace;
+
+static void transport_trace_free(gpointer data) {
+  TransportTrace *trace = data;
+  g_byte_array_unref(trace->pending);
+  g_free(trace);
+}
+
+static void trace_transport_chunk(TransportTrace *trace, GstBuffer *buffer) {
+  GstMapInfo map;
+  if (!gst_buffer_map(buffer, &map, GST_MAP_READ))
+    return;
+  g_byte_array_append(trace->pending, map.data, map.size);
+  gst_buffer_unmap(buffer, &map);
+  /* FIFO reads may split a 188-byte TS packet across GstBuffers. */
+  gsize complete = trace->pending->len / 188 * 188;
+  if (complete) {
+    if (video_trace_active(g_get_monotonic_time())) {
+      GstBuffer *packets = gst_buffer_new_allocate(NULL, complete, NULL);
+      gst_buffer_fill(packets, 0, trace->pending->data, complete);
+      trace_transport_video(packets, trace->stage, FALSE);
+      gst_buffer_unref(packets);
+    }
+    g_byte_array_remove_range(trace->pending, 0, complete);
+  }
+}
+
+static GstPadProbeReturn trace_transport_pad(GstPad *pad, GstPadProbeInfo *info, gpointer data) {
+  (void)pad;
+  if (GST_PAD_PROBE_INFO_TYPE(info) & GST_PAD_PROBE_TYPE_BUFFER_LIST) {
+    GstBufferList *list = GST_PAD_PROBE_INFO_BUFFER_LIST(info);
+    for (guint i = 0; i < gst_buffer_list_length(list); i++)
+      trace_transport_chunk(data, gst_buffer_list_get(list, i));
+  } else if (GST_PAD_PROBE_INFO_BUFFER(info)) {
+    trace_transport_chunk(data, GST_PAD_PROBE_INFO_BUFFER(info));
+  }
+  return GST_PAD_PROBE_OK;
+}
 
 #define TYPE_OMARCHY_WFD_CLIENT (omarchy_wfd_client_get_type())
 G_DECLARE_FINAL_TYPE(OmarchyWfdClient, omarchy_wfd_client, OMARCHY, WFD_CLIENT, GstRTSPClient)
@@ -171,8 +285,12 @@ static gboolean trigger_setup(gpointer data) {
 static void handle_response(GstRTSPClient *client, GstRTSPContext *ctx) {
   OmarchyWfdClient *self = OMARCHY_WFD_CLIENT(client);
   g_autofree char *body = NULL;
-  if (ctx->response->body && ctx->response->body_size)
-    body = g_strndup((char *)ctx->response->body, ctx->response->body_size);
+  guint8 *response_body = NULL;
+  guint response_size = 0;
+  /* The public accessor also handles messages backed by a GstBuffer. */
+  if (gst_rtsp_message_get_body(ctx->response, &response_body, &response_size) == GST_RTSP_OK
+      && response_body && response_size)
+    body = g_strndup((char *)response_body, response_size);
   event("rtsp-response", body ? body : "");
   switch (self->state) {
     case WFD_M1_OPTIONS:
@@ -392,8 +510,18 @@ static void client_connected(GstRTSPServer *server, GstRTSPClient *client) {
   GInetAddress *remote_address = remote && G_IS_INET_SOCKET_ADDRESS(remote)
       ? g_inet_socket_address_get_address(G_INET_SOCKET_ADDRESS(remote))
       : NULL;
-  if (!remote_address || !expected_receiver_address ||
-      !g_inet_address_equal(remote_address, expected_receiver_address)) {
+  gboolean permitted = remote_address && expected_receiver_address &&
+      g_inet_address_equal(remote_address, expected_receiver_address);
+  /* When we own the P2P group, the sink receives a DHCP address. Accept only
+   * the first peer on that dedicated group subnet, then pin its address.
+   * The listener is bound to the group's local address, never the LAN. */
+  if (remote_address && p2p_receiver_network && !p2p_peer_connected &&
+      p2p_group_owner &&
+      g_inet_address_mask_matches(p2p_receiver_network, remote_address)) {
+    g_set_object(&expected_receiver_address, remote_address);
+    permitted = TRUE;
+  }
+  if (!permitted || (p2p_receiver_network && p2p_peer_connected)) {
     g_autofree char *peer = remote_address
         ? g_inet_address_to_string(remote_address)
         : g_strdup("unknown");
@@ -402,6 +530,8 @@ static void client_connected(GstRTSPServer *server, GstRTSPClient *client) {
     return;
   }
   OMARCHY_WFD_CLIENT(client)->authorized_peer = TRUE;
+  if (p2p_receiver_network)
+    p2p_peer_connected = TRUE;
   event("receiver-state", "rtsp-connected");
   /* Roku establishes TCP before its RTSP state machine is ready. */
   g_timeout_add(500, query_support_idle, g_object_ref(client));
@@ -536,10 +666,82 @@ static gboolean interrupted(gpointer data) {
   return G_SOURCE_REMOVE;
 }
 
+typedef struct {
+  gint64 started;
+  gint64 last_report;
+  GstClockTime first_pts;
+  guint64 packets;
+} RtpProgress;
+
+static GstPadProbeReturn rtp_progress(GstPad *pad, GstPadProbeInfo *info, gpointer data) {
+  (void)pad;
+  RtpProgress *progress = data;
+  GstBuffer *buffer = NULL;
+  guint count = 1;
+  if (GST_PAD_PROBE_INFO_TYPE(info) & GST_PAD_PROBE_TYPE_BUFFER_LIST) {
+    GstBufferList *list = GST_PAD_PROBE_INFO_BUFFER_LIST(info);
+    count = gst_buffer_list_length(list);
+    if (count)
+      buffer = gst_buffer_list_get(list, count - 1);
+    for (guint i = 0; i < count; i++)
+      trace_rtp_video(gst_buffer_list_get(list, i));
+  } else {
+    buffer = GST_PAD_PROBE_INFO_BUFFER(info);
+    if (buffer)
+      trace_rtp_video(buffer);
+  }
+  if (!buffer)
+    return GST_PAD_PROBE_OK;
+  gint64 now = g_get_monotonic_time();
+  if (!progress->started) {
+    progress->started = now;
+    progress->first_pts = GST_BUFFER_PTS(buffer);
+  }
+  progress->packets += count;
+  if (now - progress->last_report >= G_USEC_PER_SEC) {
+    progress->last_report = now;
+    double media_ms = GST_CLOCK_TIME_IS_VALID(progress->first_pts) && GST_BUFFER_PTS_IS_VALID(buffer)
+        ? (double)(GST_BUFFER_PTS(buffer) - progress->first_pts) / GST_MSECOND : -1;
+    g_autofree char *detail = g_strdup_printf("packets=%" G_GUINT64_FORMAT " elapsed_ms=%.1f media_ms=%.1f",
+        progress->packets, (double)(now - progress->started) / 1000, media_ms);
+    event("rtp-progress", detail);
+  }
+  return GST_PAD_PROBE_OK;
+}
+
 static void media_configure(GstRTSPMediaFactory *factory, GstRTSPMedia *media,
                             gpointer user_data) {
   (void)factory;
   (void)user_data;
+  {
+    GstElement *element = gst_rtsp_media_get_element(media);
+    {
+      const char *names[] = {"transport_input", "transport_parser"};
+      const char *stages[] = {"remux-fifo-input", "tsparse-output"};
+      for (guint i = 0; i < G_N_ELEMENTS(names); i++) {
+        GstElement *checkpoint = gst_bin_get_by_name_recurse_up(GST_BIN(element), names[i]);
+        if (checkpoint) {
+          GstPad *checkpoint_pad = gst_element_get_static_pad(checkpoint, "src");
+          TransportTrace *trace = g_new0(TransportTrace, 1);
+          trace->stage = stages[i];
+          trace->pending = g_byte_array_new();
+          gst_pad_add_probe(checkpoint_pad, GST_PAD_PROBE_TYPE_BUFFER | GST_PAD_PROBE_TYPE_BUFFER_LIST,
+              trace_transport_pad, trace, transport_trace_free);
+          gst_object_unref(checkpoint_pad);
+          gst_object_unref(checkpoint);
+        }
+      }
+    }
+    GstElement *pay = gst_bin_get_by_name_recurse_up(GST_BIN(element), "pay0");
+    if (pay) {
+      GstPad *pad = gst_element_get_static_pad(pay, "src");
+      gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_BUFFER | GST_PAD_PROBE_TYPE_BUFFER_LIST,
+          rtp_progress, g_new0(RtpProgress, 1), g_free);
+      gst_object_unref(pad);
+      gst_object_unref(pay);
+    }
+    gst_object_unref(element);
+  }
   GstRTSPStream *stream = gst_rtsp_media_get_stream(media, 0);
   if (!stream) {
     event("rtsp-media", "missing RTP stream 0");
@@ -555,34 +757,52 @@ int main(int argc, char **argv) {
     return 2;
   }
   gst_init(&argc, &argv);
+  video_trace_enabled = g_strcmp0(g_getenv("HOVENCAST_VIDEO_TRACE"), "1") == 0;
   const char *receiver = argv[1];
   const char *artifact = argv[2];
   guint timeout = (guint)g_ascii_strtoull(argv[3], NULL, 10);
   const char *friendly_name = g_getenv("OMARCHY_CAST_FRIENDLY_NAME");
   const char *source_id = g_getenv("OMARCHY_CAST_SOURCE_ID");
+  gboolean p2p = g_strcmp0(g_getenv("HOVENCAST_TRANSPORT"), "miracast-p2p") == 0;
   if (!friendly_name || !*friendly_name)
     friendly_name = "Omarchy";
   if (!source_id || !*source_id)
     source_id = "HovenCastSender1";
   g_autoptr(GError) error = NULL;
-  g_autofree char *bind_address = route_address_for_receiver(receiver, &error);
+  g_autofree char *bind_address = p2p
+      ? g_strdup(g_getenv("HOVENCAST_P2P_LOCAL_ADDRESS"))
+      : route_address_for_receiver(receiver, &error);
+  if (p2p) {
+    g_autoptr(GInetAddress) local = bind_address
+        ? g_inet_address_new_from_string(bind_address) : NULL;
+    const char *network = g_getenv("HOVENCAST_P2P_NETWORK");
+    if (network)
+      p2p_receiver_network = g_inet_address_mask_new_from_string(network, &error);
+    if (!local || !p2p_receiver_network ||
+        !g_inet_address_mask_matches(p2p_receiver_network, local)) {
+      g_printerr("invalid Wi-Fi Direct group address or subnet\n");
+      g_clear_object(&p2p_receiver_network);
+      return 1;
+    }
+  }
   if (!bind_address) {
     g_printerr("could not determine safe RTSP bind address: %s\n", error->message);
     return 1;
   }
   expected_receiver_address = g_inet_address_new_from_string(receiver);
+  p2p_group_owner = p2p && g_strcmp0(receiver, bind_address) == 0;
   g_autoptr(OmarchyWfdServer) server = g_object_new(TYPE_OMARCHY_WFD_SERVER, NULL);
   gst_rtsp_server_set_address(GST_RTSP_SERVER(server), bind_address);
   gst_rtsp_server_set_service(GST_RTSP_SERVER(server), "7236");
   g_autoptr(GstRTSPMediaFactory) factory = gst_rtsp_media_factory_new();
   g_autofree char *escaped = g_strescape(artifact, NULL);
   g_autofree char *launch = g_strdup_printf(
-      "( filesrc location=\"%s\" blocksize=1316 do-timestamp=true "
-      "! tsparse set-timestamps=false alignment=7 "
+      "( filesrc name=transport_input location=\"%s\" blocksize=1316 do-timestamp=%s "
+      "! tsparse name=transport_parser set-timestamps=%s alignment=7 "
       "! rtpmp2tpay name=pay0 pt=33 )",
-      escaped);
+      escaped, p2p ? "false" : "true", p2p ? "true" : "false");
   gst_rtsp_media_factory_set_launch(factory, launch);
-  g_signal_connect(factory, "media-configure", G_CALLBACK(media_configure), NULL);
+  g_signal_connect(factory, "media-configure", G_CALLBACK(media_configure), GUINT_TO_POINTER(p2p));
   GstRTSPMountPoints *mounts = gst_rtsp_server_get_mount_points(GST_RTSP_SERVER(server));
   gst_rtsp_mount_points_add_factory(mounts, "/wfd1.0", g_object_ref(factory));
   g_object_unref(mounts);
@@ -592,29 +812,34 @@ int main(int argc, char **argv) {
     return 1;
   }
   g_autoptr(GSocketConnection) mice_connection = NULL;
-  if (!send_source_ready(receiver, friendly_name, source_id, &mice_connection, &error)) {
-    g_printerr("MICE signalling failed: %s\n", error->message);
-    g_clear_object(&expected_receiver_address);
-    return 1;
-  }
-  event("rtsp-listen", bind_address);
-  event("mice-source-ready", receiver);
   main_loop = g_main_loop_new(NULL, FALSE);
   g_unix_signal_add(SIGINT, interrupted, NULL);
   g_unix_signal_add(SIGTERM, interrupted, NULL);
+  g_unix_signal_add(SIGUSR1, start_live_video_trace, NULL);
+  if (!p2p && !send_source_ready(receiver, friendly_name, source_id, &mice_connection, &error)) {
+    g_printerr("MICE signalling failed: %s\n", error->message);
+    g_clear_object(&expected_receiver_address);
+    g_main_loop_unref(main_loop);
+    main_loop = NULL;
+    return 1;
+  }
+  event("rtsp-listen", bind_address);
+  event(p2p ? "p2p-source-ready" : "mice-source-ready", receiver);
   g_timeout_add_seconds(15, receiver_start_timeout, NULL);
   if (timeout > 0)
     g_timeout_add_seconds(timeout, stop_loop, NULL);
   g_main_loop_run(main_loop);
   g_autoptr(GError) stop_error = NULL;
-  if (send_stop_projection(mice_connection, friendly_name, source_id, &stop_error)) {
+  if (!p2p && send_stop_projection(mice_connection, friendly_name, source_id, &stop_error)) {
     event("mice-stop-projection", "sent");
-  } else {
+  } else if (!p2p) {
     event("mice-stop-projection", stop_error ? stop_error->message : "send-failed");
   }
-  g_io_stream_close(G_IO_STREAM(mice_connection), NULL, NULL);
+  if (mice_connection)
+    g_io_stream_close(G_IO_STREAM(mice_connection), NULL, NULL);
   g_main_loop_unref(main_loop);
   main_loop = NULL;
   g_clear_object(&expected_receiver_address);
+  g_clear_object(&p2p_receiver_network);
   return exit_status;
 }

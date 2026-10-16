@@ -1,209 +1,179 @@
-# HovenCast
+# HovenCast 2.5
 
-HovenCast is an Omarchy bar plugin that turns a compatible Roku TV into a
-wireless Hyprland display. It can place a workspace on a dedicated TV display,
-or share a desktop, application window, or selected area with desktop audio
-over the same local network.
+**Your TV. A second Omarchy monitor.**
 
-Version 0.2.0 uses Miracast over Infrastructure (MICE). It has been physically
-tested with TCL Roku models 32S331, 55S405, and 65S451. Other Roku TVs that
-advertise MICE and provide valid Roku device information are shown as
-compatible candidates, but still need community testing. Fire TV, Wi-Fi
-Direct, Google Cast, AirPlay, and non-Roku receivers are not supported.
+Move a workspace onto your TV while your laptop stays independently usable.
+You can also share a screen, application window, or selected area with audio.
+HovenCast runs as an Omarchy bar widget and streams directly over your local
+network or a dedicated Wi-Fi Direct link.
+
+## Receiver compatibility
+
+| Receiver | Connection | Validation |
+| --- | --- | --- |
+| TCL Roku 32S331, 55S405, 65S451 | Miracast over Infrastructure, same LAN | Hardware tested |
+| Fire TV Stick | Miracast over Wi-Fi Direct; keep Display Mirroring open | Hardware tested, cursor and audio tuned |
+| Google Chromecast | Native Google Cast mirroring, same LAN | Hardware tested on CarbonCast; smooth cursor, picture and audio confirmed |
+| Paired Apple TV | Encrypted native AirPlay mirroring, same LAN | Hardware tested; model-specific audio compatibility included |
+| Other Roku, Miracast, Cast, or AirPlay receivers | Depends on receiver and Wi-Fi adapter | Compatibility candidates; not universally verified |
+
+The tuned Google Cast default is 720p30 with a 6 Mbps maximum media bitrate.
+Its 400 ms receiver playback target is not total cursor latency. A camera test
+measured about 0.56 seconds using the same timing logic at a diagnostic lower
+bitrate; final picture, playback, cursor and audio were confirmed at 6 Mbps.
+See [casting measurements](docs/google-cast-cursor-results.md) and
+[Fire Stick results](docs/firestick-cursor-results.md).
+
+## Install and first use
+
+On a current Omarchy Quattro/Hyprland desktop:
+
+```sh
+omarchy plugin add https://github.com/lockinflow-sudo/hovencast.git --enable
+```
+
+1. Open the HovenCast bar widget and choose **Review and set up**.
+2. Review and confirm the changes in the terminal. Setup installs only missing
+   Arch packages, builds the Miracast helper, installs the bundled native Cast
+   and AirPlay helpers, and requests administrative approval for scoped Wi-Fi
+   Direct and read-only receiver-metadata helpers.
+3. Setup backs up your portal configuration, changes the system-wide
+   screen-sharing picker, and restarts the user portal services. Finish other
+   screen shares first. If portal setup fails, it restores the previous settings.
+4. For Google Cast or Apple TV, use **Set up Google Cast** or **Set up Apple TV**
+   in the panel. These install pinned optional Python dependencies and create
+   receiver-specific firewall allowances when UFW is active. The receiver must
+   be available on the network. Apple TV pairing happens through the panel PIN flow.
+5. Choose a workspace and TV. Approve any receiver prompt. Your laptop keeps
+   its own workspace while the selected workspace appears on the TV.
+
+The install command adds the widget; it does not silently install packages or
+change screen-sharing configuration. You can decline setup and return later.
+Setup checks are read-only. A manual terminal entry point is also available:
+
+```sh
+~/.config/omarchy/plugins/hoven.cast/hovencast-setup
+```
+
+For a known Chromecast that mDNS does not find:
+
+```sh
+~/.config/omarchy/plugins/hoven.cast/hovencast-chromecast-setup --host DEVICE_IP
+```
+
+The marketplace may still show **Manual setup** until its maintainers approve
+the updated listing and remove the existing installation override. GitHub
+publication alone does not change that marketplace setting.
+
+## Requirements and setup changes
+
+HovenCast targets Omarchy Quattro, Hyprland, PipeWire/Pulse, and the Hyprland
+screen-sharing portal. Its core package checks cover Avahi, NetworkManager,
+libnm, wpa_supplicant, dnsmasq, polkit, iptables, Python/GObject, GStreamer and
+its media plugins, FFmpeg, libportal, libpulse, opus, libvpx, GCC/pkgconf,
+grim/slurp, jq, and both desktop portal packages. The complete package list is
+in [`scripts/setup.py`](scripts/setup.py). Existing packages are preserved.
+
+Google Cast setup installs `PyChromecast==14.0.10`; Apple TV setup installs
+`pyatv==0.18.0` in a user-owned virtual environment. Native helper source,
+licenses, checksums and rebuild instructions are under [`native/`](native/).
+The bundled helpers target Linux x86-64. The Google Cast binary depends on the
+tested Arch FFmpeg/libvpx ABI; setup reports missing libraries before replacing
+an existing helper. Other architectures or later ABI changes require a rebuild.
+
+Wi-Fi Direct requires a compatible adapter and driver. Setup installs scoped
+root-owned helpers, not unrestricted sudo access. Normal discovery and casting
+use the active local session's limited polkit authorization. Wi-Fi profiles and
+session firewall leases are removed on disconnect. Google Cast and AirPlay
+setup record only newly created, receiver-specific UFW rules for later cleanup.
+
+Some adapters require an explicit scan-MAC compatibility setting. It is **off by
+default**. Use this only after diagnosing that adapter's negotiation failure:
+
+```sh
+~/.config/omarchy/plugins/hoven.cast/hovencast-setup --wifi-compat-adapter INTERFACE
+```
+
+This disables scan MAC randomization for that adapter, including ordinary Wi-Fi
+scans. The installer explains the privacy tradeoff. Uninstall removes only an
+unchanged HovenCast-owned compatibility file.
+
+## Use and stop
+
+**Extend Display** places a workspace on a dedicated wireless display. Choose
+left or right placement relative to your laptop. The panel can switch the TV's
+workspace during a session. Moving an application between laptop and TV
+workspaces also follows its audio where the application exposes a distinct
+playback stream; one browser process spanning both displays can share audio.
+
+**Share Screen** offers screen, window, and area selection. Window mode captures
+the selected monitor locally and crops the outgoing stream to the chosen window.
+Other monitor content is processed locally even though only the crop is sent.
+
+Right-click the bar icon or use the panel Stop control. HovenCast restores the
+workspace placement and prior audio route. Fire TV receivers may need Display
+Mirroring reopened before a new connection. Names alone never merge receivers;
+verified grouping keeps explicit Local network and Wi-Fi Direct choices.
+
+## Remove and recover
+
+Stop casting, disable the widget, then run cleanup **before** removing the plugin:
+
+```sh
+~/.config/omarchy/plugins/hoven.cast/hovencast-uninstall
+omarchy plugin remove hoven.cast
+```
+
+Cleanup removes HovenCast-owned receiver firewall rules and scoped privileged
+helpers, restores only portal values still owned by HovenCast, and restarts the
+user portals. It preserves unrelated configuration and pre-existing firewall
+rules. Installed packages, native helper files, optional Python environments,
+and saved pairing data are retained rather than removing shared dependencies
+or credentials automatically.
+
+If the plugin was deleted before cleanup, the self-contained portal recovery
+script remains at `${XDG_STATE_HOME:-$HOME/.local/state}/hovencast/restore-portal.py`:
+
+```sh
+python "${XDG_STATE_HOME:-$HOME/.local/state}/hovencast/restore-portal.py" remove
+systemctl --user restart xdg-desktop-portal-hyprland.service xdg-desktop-portal.service
+```
+
+That recovery restores the picker only. Reinstall the same plugin version and
+run its uninstaller to remove receiver firewall rules and privileged helpers.
+
+## Privacy, validation and limitations
+
+No cloud relay or saved screen recording is required. Session logs and picker
+previews use user-only runtime storage. AirPlay pairing credentials are stored
+with user-only permissions. Receiver names and LAN addresses are compatibility
+signals; Miracast's IP checks are not cryptographic authentication. Native Cast
+retains certificate verification, and native AirPlay uses paired encryption.
+See [SECURITY.md](SECURITY.md) for the helper authorization and trust model.
+
+The backend hardware tests were performed on an already configured laptop.
+The isolated first-run tests exercise clone, terminal setup, cancellation,
+failures, rollback and removal while simulating package installation,
+privileged installation and desktop services. They do not establish a clean
+machine's hardware compatibility. The [2.5 release checklist](RELEASE_CHECKLIST.md)
+tracks the remaining acceptance gates.
+
+Report receiver model, transport, Omarchy version and the observed failure using
+[the compatibility form](https://github.com/lockinflow-sudo/hovencast/issues/new?template=compatibility-report.yml).
+Do not include pairing secrets or unredacted personal screen content.
 
 ## Screenshots
 
 | Extend Display | Share Screen |
 | --- | --- |
-| <img src="docs/screenshots/extend-display.png" alt="HovenCast Extend Display mode" width="420"> | <img src="docs/screenshots/share-screen.png" alt="HovenCast Share Screen mode" width="420"> |
+| <img src="docs/screenshots/extend-display.png" alt="Extend Display controls" width="420"> | <img src="docs/screenshots/share-screen.png" alt="Share Screen controls" width="420"> |
 
-## Requirements
-
-- A current Omarchy installation using the Quattro shell and Hyprland portal.
-- A Roku TV with **Settings → System → Screen mirroring → Screen mirroring
-  mode** set to Prompt or Always allow. Models other than the three listed
-  above are community-tested rather than confirmed.
-- The computer and TV on the same LAN, with multicast discovery available.
-- An Arch package mirror reachable during setup if any dependency is missing.
-
-The setup script installs missing packages through `omarchy pkg add`, builds the
-small WFD/RTSP helper from included C source, and configures
-`xdg-desktop-portal-hyprland` to use HovenCast's source picker. No prebuilt binary
-or recording is included.
-
-## Install
-
-Version 0.2.0 uses HovenCast-only setup commands and runtime paths. Before
-installing it over an earlier build, run that build's bundled uninstaller and
-remove the installed plugin.
-
-```sh
-omarchy plugin add https://github.com/lockinflow-sudo/hovencast.git --enable
-~/.config/omarchy/plugins/hoven.cast/hovencast-setup
-```
-
-Setup changes `~/.config/hypr/xdph.conf` and restarts the user portal services.
-The prior values and a full pre-install copy are stored under
-`${XDG_STATE_HOME:-~/.local/state}/hovencast/` for safe removal.
-Setup changes only `custom_picker_binary`; it preserves your existing
-`allow_token_by_default` preference.
-
-## Use
-
-Click the cast icon in the Omarchy bar. HovenCast searches for compatible Roku
-TVs on the local network. Hover over a TV to see its network address and
-connection type, then choose one after selecting the content you want to show.
-Approve the sender on the TV when Roku asks.
-
-### Extend Display
-
-**Extend Display** gives the TV its own Hyprland output and puts one normal
-workspace on it. The TV is an additional desktop rather than a copy of the
-laptop screen.
-
-1. Open **TV placement** and choose **Left**, **Above**, **Below**, or **Right**
-   to match the TV's physical location.
-2. Select one of the live workspace previews.
-3. Select a Roku TV from **Available Displays**.
-4. Move the pointer through the matching laptop edge to enter the TV. For
-   example, a TV set to **Above** is reached through the top edge only.
-
-The selected workspace becomes the TV workspace. Use Omarchy's normal
-**Super+Shift+number** shortcut to move the active window to that workspace, or
-**Super+Shift+Alt+number** to move it there without following it. Move the
-window to a laptop workspace to bring it back. HovenCast first switches the
-laptop to a fallback workspace if the selected TV workspace was visible there.
-
-While casting, select another workspace preview to change the workspace shown
-on the TV without reconnecting. **Control TV** focuses the TV display and
-**Return to laptop** restores laptop focus. Omarchy's **Ctrl+Alt+Tab** and
-**Ctrl+Alt+Shift+Tab** monitor shortcuts provide the same controls even after
-the panel closes.
-
-The virtual output uses the receiver's supported mode, including 1280 × 720 on
-the TCL Roku 32S331, at scale 1. Applications therefore receive a real TV-sized
-fullscreen layout without changing the laptop display. The selected placement
-is saved for later sessions.
-
-### Share Screen
-
-**Share Screen** sends existing laptop content to the TV without creating a
-second desktop. Choose the source first, then choose a Roku TV:
-
-- **Desktop** shares the active display.
-- **Window** opens a visual picker with live application thumbnails. Select a
-  window, return to the main panel, and choose a TV. HovenCast follows the
-  window as it moves or changes size.
-- **Selection** opens the area selector. Drag over the part of the screen to
-  share, then choose a TV when the HovenCast panel returns.
-
-**TV placement** remains available in Share Screen so it can be set before the
-next Extend Display session. Screen sharing mirrors selected content and does
-not create another pointer destination.
-
-Window sharing captures the selected monitor and crops the outgoing video to
-the chosen window. Other content on that monitor is processed locally even
-though it is outside the transmitted crop, so keep sensitive windows on a
-different monitor when needed. The HovenCast portal picker is system-wide while
-the plugin is installed and can also appear for screen-sharing requests from
-other applications.
-
-### Audio, status, and stopping
-
-With **Audio on computer** off, Extend Display sends audio from applications on
-the TV workspace to the TV, while Share Screen sends session audio to the TV.
-Turn it on before connecting to hear the same audio on the computer and TV.
-The status header shows connection progress, the active TV, and the live
-bitrate; streaming details appear near the bottom of the panel.
-
-Right-click the HovenCast bar icon to stop, or reopen the panel and use the stop
-button in the header. HovenCast restores the prior audio sink, workspace
-placement, and focus after a normal stop. A detached guard restores the
-workspace and removes the virtual output if the backend crashes, and the next
-HovenCast command also recovers stale state.
-
-The workspace controller is also available from a terminal:
-
-```sh
-omarchy-cast workspace-list
-omarchy-cast workspace set 4
-omarchy-cast workspace focus-tv
-omarchy-cast workspace focus-local
-```
-
-## Remove
-
-Restore the external portal setting before deleting the plugin:
-
-```sh
-omarchy plugin disable hoven.cast
-~/.config/omarchy/plugins/hoven.cast/hovencast-uninstall
-omarchy plugin remove hoven.cast
-```
-
-The uninstaller restores only values still owned by HovenCast. If you changed a
-managed value after setup, it leaves that value alone instead of overwriting
-your newer configuration.
-
-`omarchy plugin remove` does not run plugin uninstall hooks. If the plugin was
-removed first, clone the same release again and run `./hovencast-uninstall`; its
-restore state is kept outside the plugin directory.
-
-## Privacy and files
-
-HovenCast streams directly to the selected TV on the local network and does not
-upload the capture. Its RTSP listener binds only to the receiver-facing local
-address and rejects connections not originating from the selected TV. It does
-not save screen recordings. Any portal picker preview is deleted as soon as
-selection ends. A small newline-delimited diagnostic event log is replaced for
-each session under `$XDG_RUNTIME_DIR/hovencast/` and normally disappears at
-logout.
-
-See [SECURITY.md](SECURITY.md) for the trust model, residual risks, and private
-reporting guidance.
-
-## Compatibility reports
-
-If your Roku model works—or does not—please open a
-[compatibility report](https://github.com/lockinflow-sudo/hovencast/issues/new?template=compatibility-report.yml).
-Include the TV vendor and model, Omarchy version, and which source types you
-tested. Please redact local IP addresses, usernames, and anything visible in a
-screen capture before attaching diagnostics.
-
-## Known limitations
-
-- TCL Roku models 32S331, 55S405, and 65S451 are the only physically tested
-  receivers. Other discovered Roku models may or may not work.
-- Discovery depends on Roku MICE advertisement and local multicast traffic.
-- 720p and 1080p Roku modes are selected automatically; other resolutions are
-  not supported.
-- Receiver reconnect, network-roaming, suspend/resume, and long-duration
-  reliability need broader field testing.
-- Browsers may share one audio process across multiple windows. If windows from
-  the same browser process occupy both displays, HovenCast keeps that shared
-  stream on its established display until an associated window changes
-  workspace; it cannot identify the individual tab producing the audio.
-- A compositor crash removes the headless output itself; HovenCast restores any
-  remaining saved state on the next command, but applications may decide to
-  resize or reposition their own windows after an output disappears.
-- The custom picker changes the portal picker for all applications until
-  HovenCast is uninstalled.
-
-## Development and validation
-
-```sh
-omarchy plugin validate .
-node tests/model.test.js
-python -m unittest discover -s tests -p 'test_*.py'
-./build-backend
-qmllint -I "$OMARCHY_PATH/shell" Panel.qml
-```
-
-The repository intentionally ignores local builds, Python caches, event logs,
-and transport streams.
-The marketplace preview uses synthetic receiver data and contains no private
-network addresses or personal desktop content.
+The current screenshots show the earlier panel. A real laptop-and-TV demo is
+planned; no workflow illustration is included.
 
 ## License
 
-[MIT](LICENSE)
+HovenCast's plugin code is MIT licensed. The separately invoked AirPlay helper
+is LGPL-3.0-or-later with corresponding source included. Open Screen and its
+bundled dependency notices accompany the native Google Cast helper. System
+media libraries retain their own licenses.

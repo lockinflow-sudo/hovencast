@@ -1,5 +1,6 @@
 #!/usr/bin/python
 
+import contextlib
 import io
 import json
 import os
@@ -96,6 +97,80 @@ class FakeLoop:
 
 
 class RecorderLifecycleTest(unittest.TestCase):
+    def test_receiver_streaming_state_is_forwarded_to_session_events(self) -> None:
+        recorder = Recorder.__new__(Recorder)
+        recorder.sender_process = mock.Mock(
+            stdout=io.StringIO(
+                '{"event":"receiver-state","detail":"rtsp-connected"}\n'
+                '{"event":"receiver-state","detail":"streaming"}\n'
+            )
+        )
+        recorder.event_file = io.StringIO()
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            recorder._forward_sender_events()
+
+        records = [
+            json.loads(line) for line in recorder.event_file.getvalue().splitlines()
+        ]
+        self.assertEqual(
+            [record["detail"] for record in records],
+            ["rtsp-connected", "streaming"],
+        )
+
+    def test_p2p_keeps_audio_intact_without_changing_legacy_queues(self):
+        from omarchy_cast_protocol import VIDEO_MODE_720P, p2p_video_mode
+
+        for p2p in (False, True):
+            with self.subTest(p2p=p2p):
+                recorder = Recorder.__new__(Recorder)
+                recorder.audio_route = None
+                recorder.output = pathlib.Path("/tmp/test-queue.ts")
+                recorder.mirror_output = None
+                recorder.video_profile = "baseline"
+                recorder.video_mode = p2p_video_mode(VIDEO_MODE_720P) if p2p else VIDEO_MODE_720P
+                recorder.p2p_pipeline = p2p
+                recorder.source_kind = "workspace"
+                recorder._launch_sender = mock.Mock(return_value=True)
+                recorder._fail = mock.Mock()
+                with mock.patch("omarchy_cast.pulse_default_monitor", return_value="test.monitor"), mock.patch("omarchy_cast.Gst.parse_launch", return_value=None) as parse:
+                    recorder._start_pipeline(1, 2)
+                description = parse.call_args.args[0]
+                if p2p:
+                    self.assertIn("audio_capture_queue max-size-time=250000000\n", description)
+                    self.assertIn("video_mux_queue max-size-time=250000000", description)
+                    self.assertIn("video_encode_queue max-size-time=66666667 leaky=downstream", description)
+                else:
+                    self.assertIn(f"audio_capture_queue max-size-time={recorder.video_mode.queue_time_ns} leaky=downstream", description)
+
+    def test_p2p_sender_starts_before_portal_and_only_once(self) -> None:
+        order = []
+        sender = mock.Mock(pid=123)
+        launch = mock.Mock(side_effect=lambda: order.append("sender") or (sender, []))
+        with mock.patch("omarchy_cast.Xdp.Portal.new") as portal_factory, \
+             mock.patch("omarchy_cast.GLib.MainLoop") as loop_factory, \
+             mock.patch("omarchy_cast.GLibUnix.signal_add"):
+            recorder = Recorder(pathlib.Path("/unused"), 0, io.StringIO(), False,
+                                sender_start=launch, sender_early=True)
+            portal_factory.return_value.create_screencast_session.side_effect = \
+                lambda *args: order.append("portal")
+            recorder.start()
+            self.assertEqual(order, ["sender", "portal"])
+            self.assertTrue(recorder._launch_sender())
+            launch.assert_called_once()
+            loop_factory.return_value.run.assert_called_once()
+
+    def test_early_sender_failure_does_not_open_portal(self) -> None:
+        with mock.patch("omarchy_cast.Xdp.Portal.new") as portal_factory, \
+             mock.patch("omarchy_cast.GLib.MainLoop"):
+            recorder = Recorder(pathlib.Path("/unused"), 0, io.StringIO(), False,
+                                sender_start=mock.Mock(side_effect=OSError("bind failed")),
+                                sender_early=True)
+            with mock.patch.object(recorder, "_fail") as fail:
+                self.assertEqual(recorder.start(), 1)
+                fail.assert_called_once()
+            portal_factory.return_value.create_screencast_session.assert_not_called()
+
     def test_picker_automatically_selects_owned_virtual_output(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)

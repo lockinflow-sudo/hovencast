@@ -1,0 +1,10 @@
+// Only the active local desktop may run this fixed, input-validating helper.
+// No generic Python, shell, NetworkManager, or firewall privilege is granted.
+polkit.addRule(function(action, subject) {
+    if (action.id === "org.hovencast.p2p.connect") {
+        if (subject.local === true && subject.active === true) {
+            return polkit.Result.YES;
+        }
+        return polkit.Result.NO;
+    }
+});

@@ -1,5 +1,58 @@
+function setupLaunchCommand(setupPath) {
+  return ["omarchy", "launch", "terminal", "-e", "bash", "-c",
+    '"$1"; result=$?; printf "\\nPress Enter to close…"; read -r; exit "$result"',
+    "hovencast-setup", String(setupPath)]
+}
+
+function parseSetup(raw) {
+  try {
+    var result = JSON.parse(String(raw || "{}"))
+    if (typeof result.ready !== "boolean" || !Array.isArray(result.issues))
+      return { ready: false, error: "Setup status is unavailable. Try checking again." }
+    return { ready: result.ready, error: result.issues.map(String).join("\n") }
+  } catch (error) {
+    return { ready: false, error: "Setup status could not be read. Try checking again." }
+  }
+}
+
 function version() {
-  return "0.2.0"
+  return "2.5.0"
+}
+
+function buildTitle() {
+  return "HovenCast v" + version()
+}
+
+function parseEndpoint(receiver) {
+  return {
+    name: String(receiver.name || receiver.address || ""),
+    address: String(receiver.address || "").trim(),
+    port: Number(receiver.port || 7250),
+    interface: String(receiver.interface || ""),
+    protocol: String(receiver.protocol || "miracast-mice"),
+    nativeWidth: Number(receiver.native_width || 0),
+    nativeHeight: Number(receiver.native_height || 0),
+    paired: Boolean(receiver.paired),
+    model: String(receiver.model || "")
+  }
+}
+
+function endpointByAddress(receiver, address) {
+  if (String(receiver.address || "") === String(address)) return receiver
+  var endpoints = receiver.endpoints || []
+  for (var i = 0; i < endpoints.length; i++)
+    if (String(endpoints[i].address) === String(address)) return endpoints[i]
+  return null
+}
+
+function connectionSummary(receiver) {
+  var endpoints = receiver.endpoints || [receiver]
+  var labels = []
+  for (var i = 0; i < endpoints.length; i++) {
+    var label = connectionLabel(endpoints[i].protocol)
+    if (labels.indexOf(label) < 0) labels.push(label)
+  }
+  return labels.join(" + ")
 }
 
 function parseDiscovery(raw) {
@@ -16,16 +69,15 @@ function parseDiscovery(raw) {
       var address = String(receiver.address || "").trim()
       if (address === "" || seen[address]) continue
       seen[address] = true
-      result.receivers.push({
-        name: String(receiver.name || address),
-        address: address,
-        port: Number(receiver.port || 7250),
-        interface: String(receiver.interface || ""),
-        protocol: String(receiver.protocol || "miracast-mice"),
-        nativeWidth: Number(receiver.native_width || 0),
-        nativeHeight: Number(receiver.native_height || 0),
-        model: String(receiver.model || "")
-      })
+      var row = parseEndpoint(receiver)
+      if (Array.isArray(receiver.endpoints) && receiver.endpoints.length === 2) {
+        var endpoints = receiver.endpoints.map(parseEndpoint)
+        if (endpoints.every(function(endpoint) { return endpoint.address !== "" })
+            && endpoints[0].address === row.address
+            && endpoints[0].protocol === row.protocol
+            && endpoints[1].address !== endpoints[0].address) row.endpoints = endpoints
+      }
+      result.receivers.push(row)
     }
   } catch (error) {
     result.error = "The casting backend returned unreadable discovery data."
@@ -142,6 +194,7 @@ function displayName(output, description) {
 function protocolLabel(protocol) {
   if (String(protocol || "") === "miracast-mice") return "MIRACAST · LOCAL NETWORK"
   if (String(protocol || "") === "miracast-p2p") return "MIRACAST · WI-FI DIRECT"
+  if (String(protocol || "") === "airplay") return "AIRPLAY"
   if (String(protocol || "") === "google-cast") return "GOOGLE CAST"
   return String(protocol || "WIRELESS DISPLAY").replace(/-/g, " ").toUpperCase()
 }
@@ -149,6 +202,7 @@ function protocolLabel(protocol) {
 function protocolName(protocol) {
   if (String(protocol || "") === "miracast-mice") return "MIRACAST"
   if (String(protocol || "") === "miracast-p2p") return "MIRACAST"
+  if (String(protocol || "") === "airplay") return "AIRPLAY"
   if (String(protocol || "") === "google-cast") return "GOOGLE CAST"
   return String(protocol || "WIRELESS DISPLAY").replace(/-/g, " ").toUpperCase()
 }
@@ -156,6 +210,7 @@ function protocolName(protocol) {
 function connectionLabel(protocol) {
   if (String(protocol || "") === "miracast-mice") return "LOCAL NETWORK"
   if (String(protocol || "") === "miracast-p2p") return "WI-FI DIRECT"
+  if (String(protocol || "") === "airplay") return "LOCAL NETWORK"
   if (String(protocol || "") === "google-cast") return "LOCAL NETWORK"
   return "WIRELESS"
 }
@@ -194,6 +249,11 @@ function localPath(url) {
 if (typeof module !== "undefined") {
   module.exports = {
     version: version,
+    buildTitle: buildTitle,
+    endpointByAddress: endpointByAddress,
+    connectionSummary: connectionSummary,
+    parseSetup: parseSetup,
+    setupLaunchCommand: setupLaunchCommand,
     parseDiscovery: parseDiscovery,
     parseEvent: parseEvent,
     parseWorkspaces: parseWorkspaces,

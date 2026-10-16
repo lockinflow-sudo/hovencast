@@ -19,6 +19,9 @@ from omarchy_cast_protocol import (  # noqa: E402
     _read_avahi_output,
     build_mice_source_ready,
     choose_video_mode,
+    p2p_video_mode,
+    live_remux_command,
+    VIDEO_MODE_720P,
     decode_avahi_name,
     discover_mice_receivers,
     enrich_receiver_details,
@@ -30,6 +33,29 @@ from omarchy_cast_protocol import (  # noqa: E402
 
 
 class MiceSourceReadyTest(unittest.TestCase):
+    def test_p2p_latency_profile_does_not_change_roku_mode(self):
+        tuned = p2p_video_mode(VIDEO_MODE_720P)
+        self.assertEqual((tuned.width, tuned.height, tuned.cea_bitmap), (1280, 720, "00000020"))
+        self.assertEqual(tuned.encoder_preset, "superfast")
+        self.assertEqual(tuned.bitrate_kbps, 5000)
+        self.assertEqual(tuned.vbv_buffer_ms, 200)
+        self.assertLess(tuned.queue_time_ns, VIDEO_MODE_720P.queue_time_ns)
+        self.assertEqual(VIDEO_MODE_720P.encoder_preset, "veryfast")
+
+    def test_only_p2p_remux_uses_low_latency_options(self):
+        tuned = live_remux_command("input", "output", p2p=True)
+        legacy = live_remux_command("input", "output")
+        self.assertEqual(tuned[tuned.index("-muxdelay") + 1], "0.075")
+        self.assertEqual(tuned[tuned.index("-muxpreload") + 1], "0.075")
+        self.assertEqual(legacy[legacy.index("-muxdelay") + 1], "0.7")
+        self.assertIn("-flush_packets", tuned)
+        self.assertNotIn("-flush_packets", legacy)
+        # Physical choppiness report: restore the pre-experiment remux profile.
+        for option in ("-thread_queue_size", "-pcr_period", "-avioflags"):
+            self.assertNotIn(option, tuned)
+            self.assertNotIn(option, legacy)
+        self.assertNotIn("-fflags", tuned)
+        self.assertLess(tuned.index("-analyzeduration"), tuned.index("-i"))
     def test_message_has_length_version_command_and_tlvs(self) -> None:
         message = build_mice_source_ready("Omarchy")
         self.assertEqual(struct.unpack(">H", message[:2])[0], len(message))
@@ -124,11 +150,12 @@ class ReceiverProfileTest(unittest.TestCase):
             Receiver("Untested", "192.168.1.11", 7250, "wlan0"),
             Receiver("Unverified", "192.168.1.12", 7250, "wlan0"),
         ]
-        probe.side_effect = [
-            {"vendor": "TCL", "model": "32S331", "native_width": 1280, "native_height": 720},
-            {"vendor": "Hisense", "model": "R6", "native_width": 1920, "native_height": 1080},
-            {},
-        ]
+        details = {
+            "192.168.1.10": {"vendor": "TCL", "model": "32S331", "native_width": 1280, "native_height": 720},
+            "192.168.1.11": {"vendor": "Hisense", "model": "R6", "native_width": 1920, "native_height": 1080},
+            "192.168.1.12": {},
+        }
+        probe.side_effect = lambda address: details[address]
 
         supported = enrich_receiver_details(receivers)
 

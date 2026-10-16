@@ -13,6 +13,11 @@ import xml.etree.ElementTree as ET
 from typing import Any, BinaryIO
 from dataclasses import asdict, dataclass, replace
 
+from cast_identity import (
+    DiscoveryService, IdentityEvidence, identity_claims,
+    normalize_guid, normalize_roku_id,
+)
+
 
 MICE_PROTOCOL_VERSION = 1
 MICE_SOURCE_READY = 1
@@ -37,9 +42,15 @@ class Receiver:
     native_height: int | None = None
     model: str = ""
     vendor: str = ""
+    # Internal observations only. Keep the legacy discovery wire format stable.
+    discovery_service: DiscoveryService | None = None
+    identity_evidence: tuple[IdentityEvidence, ...] = ()
 
     def json(self) -> dict[str, Any]:
-        return asdict(self)
+        legacy = asdict(self)
+        legacy.pop("discovery_service")
+        legacy.pop("identity_evidence")
+        return legacy
 
 
 @dataclass(frozen=True)
@@ -58,6 +69,29 @@ VIDEO_MODE_720P = VideoMode("720p", 1280, 720, 5000, "veryfast", "00000020", 120
 VIDEO_MODE_1080P = VideoMode("1080p", 1920, 1080, 6000, "ultrafast", "00000080", 500_000_000, 600)
 
 
+def p2p_video_mode(mode: VideoMode) -> VideoMode:
+    """Keep receiver resolution/profile, but bound interactive encoding latency."""
+    return replace(mode, bitrate_kbps=5000 if mode.height <= 720 else 6500,
+                   encoder_preset="superfast", queue_time_ns=66_666_667,
+                   vbv_buffer_ms=200)
+
+
+def live_remux_command(source: str, destination: str, *, p2p: bool = False) -> list[str]:
+    command = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "fatal", "-y"]
+    if p2p:
+        command += ["-probesize", "131072", "-analyzeduration", "200000"]
+    command += ["-i", source, "-map", "0:v:0", "-map", "0:a:0", "-c", "copy",
+                "-mpegts_start_pid", "256", "-mpegts_pmt_start_pid", "4096",
+                # A hardware decoder needs PCR-to-presentation headroom;
+                # the zero-delay trial passed packet tests but coincided with
+                # a receiver-side freeze during workspace/video changes.
+                "-muxdelay", "0.075" if p2p else "0.7",
+                "-muxpreload", "0.075" if p2p else "0.7"]
+    if p2p:
+        command += ["-flush_packets", "1"]
+    return command + ["-f", "mpegts", destination]
+
+
 def parse_roku_device_info(payload: bytes | str) -> dict[str, Any]:
     try:
         root = ET.fromstring(payload)
@@ -72,12 +106,25 @@ def parse_roku_device_info(payload: bytes | str) -> dict[str, Any]:
     }.get(resolution)
     if dimensions is None:
         return {}
-    return {
+    details: dict[str, Any] = {
         "native_width": dimensions[0],
         "native_height": dimensions[1],
         "model": str(root.findtext("model-name") or "").strip(),
         "vendor": str(root.findtext("vendor-name") or "").strip(),
     }
+    evidence = ()
+    for tag, namespace, normalize in (
+        ("udn", "roku-udn", normalize_guid),
+        ("serial-number", "roku-serial-number", normalize_roku_id),
+        ("device-id", "roku-device-id", normalize_roku_id),
+    ):
+        evidence += identity_claims(
+            namespace, (node.text or "" for node in root.findall(tag) if not len(node)),
+            "roku-ecp", normalize,
+        )
+    if evidence:
+        details["identity_evidence"] = evidence
+    return details
 
 
 def probe_roku_device_info(address: str, timeout: float = 0.75) -> dict[str, Any]:
@@ -106,7 +153,12 @@ def enrich_receiver_details(receivers: list[Receiver]) -> list[Receiver]:
         # Model names are compatibility metadata, not a security boundary.
         if not detail:
             continue
-        supported.append(replace(receiver, **detail))
+        # ECP supplements the mDNS claim; it must not overwrite it. Do not
+        # reconcile differing namespaces or suppress conflicting values here.
+        metadata = dict(detail)
+        evidence = metadata.pop("identity_evidence", ())
+        combined = tuple(dict.fromkeys((*receiver.identity_evidence, *evidence)))
+        supported.append(replace(receiver, **metadata, identity_evidence=combined))
     return supported
 
 
@@ -149,6 +201,47 @@ def send_mice_source_ready(address: str, name: str, port: int = 7250, timeout: f
 
 def decode_avahi_name(value: str) -> str:
     return re.sub(r"\\(\d{3})", lambda match: chr(int(match.group(1), 10)), value)
+
+
+def parse_mice_identity(txt: str) -> tuple[IdentityEvidence, ...]:
+    """Extract only container_id from Avahi's quoted TXT string list.
+
+    Preserve Avahi decimal escaping until after tokenization (shlex would
+    consume the backslashes). Reject malformed framing, not the receiver.
+    Other TXT entries are deliberately not retained as personal metadata.
+    """
+    if len(txt) > MAX_AVAHI_LINE_BYTES:
+        return ()
+    remaining = txt.strip()
+    values = []
+    while remaining:
+        match = re.match(r'"((?:[^"\\]|\\.)*)"(?:\s+|$)', remaining)
+        if not match:
+            return ()
+        # TXT quoting also escapes literal backslashes and quotes. Decode in
+        # one pass so an escaped literal backslash cannot become a decimal
+        # escape during a second pass.
+        def unescape(escape: re.Match[str]) -> str:
+            value = escape[1]
+            if value.isdigit():
+                number = int(value)
+                return chr(number) if number <= 255 else "\x00"
+            return value
+
+        item = re.sub(r'\\([0-9]{3}|["\\])', unescape, match[1])
+        key, separator, value = item.partition("=")
+        if separator and key.casefold() == "container_id":
+            values.append(value)
+        remaining = remaining[match.end():]
+    return identity_claims("mice-container-id", values, "mice-mdns", normalize_guid)
+
+
+def parse_mice_service(fields: list[str]) -> DiscoveryService | None:
+    values = tuple(decode_avahi_name(value) for value in (fields[3], fields[4], fields[5], fields[6]))
+    if any(not value or len(value) > 255 or any(ord(char) < 32 or ord(char) == 127 for char in value)
+           for value in values):
+        return None
+    return DiscoveryService(*values)
 
 
 def _read_avahi_output(timeout: float, command: list[str] | None = None) -> bytes:
@@ -208,7 +301,11 @@ def discover_mice_receivers(timeout: int = 4) -> list[Receiver]:
             continue
         if not 0 < port < 65536:
             continue
-        receiver = Receiver(decode_avahi_name(name), address, port, interface)
+        receiver = Receiver(
+            decode_avahi_name(name), address, port, interface,
+            discovery_service=parse_mice_service(fields),
+            identity_evidence=parse_mice_identity(";".join(fields[9:])),
+        )
         receivers[(receiver.address, receiver.port)] = receiver
         if len(receivers) >= MAX_MICE_RECEIVERS:
             break

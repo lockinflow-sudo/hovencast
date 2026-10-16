@@ -1,0 +1,3 @@
+#!/usr/bin/sh
+# Caller-controlled arguments follow a fixed script, never Python options.
+exec /usr/bin/python -I /usr/local/libexec/hovencast-metadata-reader.py --caller "$@"

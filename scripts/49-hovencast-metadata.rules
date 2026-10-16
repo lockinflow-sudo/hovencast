@@ -1,0 +1,7 @@
+// Only this fixed read-only helper, only the active local desktop.
+polkit.addRule(function(action, subject) {
+    if (action.id === "org.hovencast.metadata.read") {
+        return subject.local === true && subject.active === true
+            ? polkit.Result.YES : polkit.Result.NO;
+    }
+});

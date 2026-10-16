@@ -1,0 +1,13 @@
+{
+  "upstream": "https://github.com/omarroth/doubletake",
+  "revision": "5e2f1cbe3e1070bcefec8e549c7baf884727bc00",
+  "license": "LGPL-3.0-or-later",
+  "modifications": [
+    "MPEG-TS FIFO input without duplicate capture/encoding",
+    "pair-only CLI mode",
+    "expected receiver identity check",
+    "first-video-sent event",
+    "AppleTV6,2 screen audio uses verified legacy controlPort descriptor; regression test preserves other transport settings"
+  ],
+  "binary_sha256": "987fa07fd7815c1be8f563338098e1e711796af361331599f94c0a4770a22c3c"
+}

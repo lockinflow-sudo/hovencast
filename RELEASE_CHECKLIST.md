@@ -61,3 +61,18 @@
 - [x] Pass a clean-install test from a fresh clone.
 - [x] Pass five consecutive stop/start cycles against the TCL Roku 32S331.
 - [x] Install or publish the updated plugin only after explicit owner approval.
+
+## v2.5.0 unified casting and first-use setup
+
+- [x] Integrate the hardware-tuned Fire TV, Google Cast and Apple TV backends.
+- [x] Preserve the plugin ID `hoven.cast`; use version `2.5.0` and tag `v2.5.0`.
+- [x] Integrate guided core setup, cancellation, portal rollback and surviving recovery.
+- [x] Offer Google Cast and Apple TV setup from the panel.
+- [x] Bundle the tested native helpers with provenance, license notices and rebuild inputs.
+- [x] Document optional dependencies, privileged helper scope and adapter compatibility opt-in.
+- [x] Preserve the preferred Google Cast 720p layout, 6 Mbps cap and tuned timing.
+- [x] Complete the integrated regression, source audit and isolated first-run checks.
+- [ ] Run actual first-use setup and hardware acceptance in the selected clean environment.
+- [ ] Publish the reviewed commit and `v2.5.0` GitHub release.
+- [ ] Request marketplace validation of that exact commit and removal of the manual-install override.
+- [ ] Confirm the deployed marketplace snapshot and Copy install command.

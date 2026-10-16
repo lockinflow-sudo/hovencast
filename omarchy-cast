@@ -13,4 +13,9 @@ if [[ ! -x "$sender" || "$built_hash" != "$source_hash" ]]; then
   "$root/build-backend"
 fi
 
-exec python "$root/src/omarchy_cast.py" "$@"
+python_bin=python
+cast_env="${XDG_DATA_HOME:-$HOME/.local/share}/hovencast/chromecast-venv"
+if [[ -x "$cast_env/bin/python" ]]; then
+  python_bin="$cast_env/bin/python"
+fi
+exec "$python_bin" "$root/src/omarchy_cast.py" "$@"

@@ -22,6 +22,7 @@ from omarchy_cast import (  # noqa: E402
     run_source_list,
     run_session_runner,
     run_session_start,
+    run_cast_live,
     session_runner_command,
 )
 
@@ -50,6 +51,39 @@ def arguments(**overrides: object) -> argparse.Namespace:
 
 
 class CastSessionTest(unittest.TestCase):
+    def test_failed_pairing_does_not_start_capture_or_move_workspace(self):
+        with tempfile.TemporaryDirectory() as directory:
+            events = pathlib.Path(directory) / "events.jsonl"
+            with mock.patch("omarchy_cast.cast_session_path", return_value=events), \
+                 mock.patch("omarchy_cast.P2PLink") as factory, \
+                 mock.patch("omarchy_cast._run_cast_live_connected") as capture, \
+                 mock.patch("omarchy_cast.signal.signal"), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                factory.return_value.connect.side_effect = RuntimeError("pairing failed")
+                self.assertEqual(run_cast_live(arguments(address="p2p:fa:54:b8:75:00:2b")), 1)
+                capture.assert_not_called()
+                factory.return_value.close.assert_called_once()
+                records = [json.loads(line) for line in events.read_text().splitlines()]
+                self.assertEqual(records[-1]["event"], "sender-start-failed")
+
+    def test_capture_starts_only_after_pairing_and_link_is_closed(self):
+        order = []
+        with tempfile.TemporaryDirectory() as directory:
+            events = pathlib.Path(directory) / "events.jsonl"
+            with mock.patch("omarchy_cast.cast_session_path", return_value=events), \
+                 mock.patch("omarchy_cast.P2PLink") as factory, \
+                 mock.patch("omarchy_cast._run_cast_live_connected") as capture, \
+                 mock.patch("omarchy_cast.signal.signal"), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                link = factory.return_value
+                link.interface, link.local_address, link.address = "p2p-test", "192.168.49.2", "192.168.49.1"
+                link.connect.side_effect = lambda *args, **kwargs: order.append("pair")
+                capture.side_effect = lambda *args: order.append("capture") or 0
+                self.assertEqual(run_cast_live(arguments(address="p2p:fa:54:b8:75:00:2b")), 0)
+                self.assertEqual(order, ["pair", "capture"])
+                link.close.assert_called_once()
+                self.assertIn("p2p-connected", events.read_text())
+
     @mock.patch("omarchy_cast.subprocess.run")
     def test_source_list_removes_the_legacy_desktop_preview(
         self, run: mock.Mock
@@ -136,15 +170,19 @@ class CastSessionTest(unittest.TestCase):
                 encoding="utf-8",
             )
             (state_root / "session.events.jsonl").write_text(
-                json.dumps(
-                    {
-                        "time": 2,
-                        "event": "metrics",
-                        "video_frames": 90,
-                        "audio_buffers": 140,
-                        "bitrate_bps": 4_000_000,
-                        "av_drift_ms": 2.5,
-                    }
+                "\n".join(
+                    json.dumps(record)
+                    for record in (
+                        {
+                            "time": 2,
+                            "event": "metrics",
+                            "video_frames": 90,
+                            "audio_buffers": 140,
+                            "bitrate_bps": 4_000_000,
+                            "av_drift_ms": 2.5,
+                        },
+                        {"time": 3, "event": "receiver-state", "detail": "streaming"},
+                    )
                 )
                 + "\n",
                 encoding="utf-8",
@@ -156,6 +194,39 @@ class CastSessionTest(unittest.TestCase):
         self.assertEqual(snapshot["state"], "streaming")
         self.assertEqual(snapshot["workspace"], "1")
         self.assertEqual(snapshot["video_frames"], 90)
+
+    def test_snapshot_stays_connecting_until_receiver_streams(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime = pathlib.Path(temporary)
+            state_root = runtime / "hovencast"
+            state_root.mkdir()
+            (state_root / "cast-session.json").write_text(
+                json.dumps(
+                    {
+                        "pid": os.getpid(),
+                        "start_ticks": process_start_ticks(os.getpid()),
+                        "started_at": 1,
+                        "stop_requested": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (state_root / "session.events.jsonl").write_text(
+                "\n".join(
+                    json.dumps(record)
+                    for record in (
+                        {"time": 2, "event": "first-video"},
+                        {"time": 3, "event": "metrics", "video_frames": 90},
+                        {"time": 4, "event": "receiver-state", "detail": "rtsp-connected"},
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(runtime)}):
+                snapshot = cast_session_snapshot()
+
+        self.assertEqual(snapshot["state"], "connecting")
 
     def test_last_failure_ignores_cleanup_events(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

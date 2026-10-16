@@ -1,0 +1,617 @@
+diff --git i/BUILD.gn w/BUILD.gn
+index 5659a64..380941e 100644
+--- i/BUILD.gn
++++ w/BUILD.gn
+@@ -40,135 +40,7 @@ config("features") {
+   }
+ }
+ 
+-# All compilable non-test targets in the repository (both executables and
+-# source_sets)
+ group("gn_all") {
+   testonly = true
+-  deps = [
+-    "cast/common:certificate",
+-    "cast/common:channel",
+-    "cast/common:public",
+-    "cast/receiver:channel",
+-    "cast/sender:channel",
+-    "osp/msgs",
+-    "third_party/abseil",
+-    "third_party/boringssl",
+-    "third_party/googleurl",
+-    "third_party/jsoncpp",
+-    "third_party/tinycbor",
+-    "tools/cddl($host_toolchain)",
+-    "util",
+-  ]
+-
+-  # TODO(issuetracker.google.com/236163082): implement support on Windows.
+-  if (!is_win) {
+-    deps += [
+-      "cast/streaming:receiver",
+-      "cast/streaming:sender",
+-      "discovery:dnssd",
+-      "discovery:mdns",
+-      "discovery:public",
+-      "osp",
+-      "platform",
+-
+-      # Quiche currently has an issue around logging macros on Windows.
+-      "third_party/quiche",
+-    ]
+-    if (!build_with_chromium) {
+-      deps += [
+-        "cast/standalone_sender:cast_sender",
+-        "osp:osp_demo",
+-        "third_party/protobuf:protoc($host_toolchain)",
+-        "third_party/zlib",
+-      ]
+-      if (build_python_bindings) {
+-        deps += [
+-          "cast/standalone_sender/bindings/python:cast_sender_python_bindings",
+-        ]
+-      }
+-    }
+-  }
+-
+-  # The cast_receiver depends on the standalone implementation which is only
+-  # implemented for certain operating systems.
+-  if (is_linux || is_mac || is_chromeos || is_android) {
+-    deps += [ "cast/standalone_receiver:cast_receiver" ]
+-  }
+-
+-  visibility = []
+-}
+-
+-openscreen_source_set("openscreen_unittests_all") {
+-  testonly = true
+-  public_deps = [
+-    "cast/common:unittests",
+-    "cast/receiver:unittests",
+-    "cast/sender:unittests",
+-    "cast/streaming:unittests",
+-    "cast/test:unittests",
+-    "platform:unittests",
+-    "util:unittests",
+-  ]
+-
+-  if (!build_with_chromium && is_posix) {
+-    public_deps += [
+-      "cast/test:make_crl_tests($host_toolchain)",
+-
+-      # TODO(crbug.com/1132604): Discovery unittests fail in Chrome.
+-      "discovery:unittests",
+-    ]
+-  }
+-  if (!build_with_chromium) {
+-    public_deps += [
+-      "cast/standalone_sender:unittests",
+-      "osp/msgs:unittests",
+-    ]
+-    if (!is_win) {
+-      public_deps += [ "osp:unittests" ]
+-    }
+-  }
+-  if (build_python_bindings) {
+-    public_deps += [ "cast/standalone_sender/bindings/python:unittests" ]
+-  }
+-}
+-if (!build_with_chromium) {
+-  openscreen_executable("openscreen_unittests") {
+-    testonly = true
+-    deps = [
+-      ":openscreen_unittests_all",
+-      "cast/common:certificate_boringssl",
+-      "test:test_main",
+-    ]
+-  }
+-}
+-if (!build_with_chromium && is_posix) {
+-  openscreen_source_set("e2e_tests_all") {
+-    testonly = true
+-    public_deps = [
+-      "cast/test:e2e_tests",
+-      "cast/test:make_crl_tests($host_toolchain)",
+-    ]
+-    if (is_linux) {
+-      public_deps += [ "cast/common:discovery_e2e_test" ]
+-    }
+-  }
+-  openscreen_executable("e2e_tests") {
+-    testonly = true
+-    deps = [
+-      ":e2e_tests_all",
+-      "test:test_main",
+-    ]
+-  }
+-}
+-if (!build_with_chromium) {
+-  openscreen_source_set("fuzzer_tests_all") {
+-    testonly = true
+-    deps = [
+-      "//cast/common:message_framer_fuzzer",
+-      "//cast/streaming:compound_rtcp_parser_fuzzer",
+-      "//cast/streaming:rtp_packet_parser_fuzzer",
+-      "//cast/streaming:sender_report_parser_fuzzer",
+-      "//discovery:mdns_fuzzer",
+-    ]
+-  }
++  deps = [ "cast/standalone_sender:cast_sender" ]
+ }
+diff --git i/cast/standalone_common/ffmpeg_glue.cc w/cast/standalone_common/ffmpeg_glue.cc
+index 5a9e4f4..9b79786 100644
+--- i/cast/standalone_common/ffmpeg_glue.cc
++++ w/cast/standalone_common/ffmpeg_glue.cc
+@@ -5,6 +5,7 @@
+ #include "cast/standalone_common/ffmpeg_glue.h"
+ 
+ #include <libavcodec/version.h>
++#include <string_view>
+ 
+ #include "util/osp_logging.h"
+ #include "util/std_util.h"
+@@ -12,8 +13,13 @@
+ namespace openscreen::cast {
+ namespace internal {
+ 
+-AVFormatContext* CreateAVFormatContextForFile(const char* path) {
+-  AVFormatContext* format_context = nullptr;
++AVFormatContext* CreateAVFormatContextForFile(const char* path, AVIOInterruptCB interrupt) {
++  AVFormatContext* format_context = avformat_alloc_context();
++  format_context->interrupt_callback = interrupt;
++  if (std::string_view(path).starts_with("http://127.0.0.1:")) {
++    format_context->probesize = 100000;
++    format_context->max_analyze_duration = 100000;
++  }
+ #if LIBAVCODEC_VERSION_MAJOR < 59
+ #pragma GCC diagnostic push
+ #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+diff --git i/cast/standalone_common/ffmpeg_glue.h w/cast/standalone_common/ffmpeg_glue.h
+index 52e0a47..6026a0e 100644
+--- i/cast/standalone_common/ffmpeg_glue.h
++++ w/cast/standalone_common/ffmpeg_glue.h
+@@ -28,7 +28,8 @@ namespace internal {
+ 
+ // Convenience allocator for a new AVFormatContext, given a file `path`. Returns
+ // nullptr on error. Note: MakeUniqueAVFormatContext() is the public API.
+-AVFormatContext* CreateAVFormatContextForFile(const char* path);
++AVFormatContext* CreateAVFormatContextForFile(
++    const char* path, AVIOInterruptCB interrupt = {});
+ 
+ }  // namespace internal
+ 
+diff --git i/cast/standalone_sender/looping_file_cast_agent.cc w/cast/standalone_sender/looping_file_cast_agent.cc
+index 2570463..1765ec9 100644
+--- i/cast/standalone_sender/looping_file_cast_agent.cc
++++ w/cast/standalone_sender/looping_file_cast_agent.cc
+@@ -5,6 +5,7 @@
+ #include "cast/standalone_sender/looping_file_cast_agent.h"
+ 
+ #include <algorithm>
++#include <cstdlib>
+ #include <format>
+ #include <optional>
+ #include <string>
+@@ -321,7 +322,7 @@ void LoopingFileCastAgent::CreateAndStartSession() {
+ 
+   OSP_CHECK(remote_connection_.has_value());
+   environment_ =
+-      std::make_unique<Environment>(&Clock::now, task_runner_, IPEndpoint{});
++      std::make_unique<Environment>(&Clock::now, task_runner_, IPEndpoint{IPAddress::kAnyV4(), 8766});
+ 
+   SenderSession::Configuration config{
+       connection_settings_->receiver_endpoint.address,
+@@ -350,8 +351,18 @@ void LoopingFileCastAgent::CreateAndStartSession() {
+           connection_settings_->max_bitrate -
+           (connection_settings_->should_include_audio ? audio_config.bit_rate
+                                                       : 0)};
+-  // Use default display resolution of 1080P.
+-  video_config.resolutions.emplace_back(Resolution{1920, 1080});
++  // HovenCast can request a bounded interactive playback window. Preserve
++  // the standalone sender default when no override was provided.
++  if (const char* delay_text = std::getenv("HOVENCAST_CAST_PLAYOUT_DELAY_MS")) {
++    char* end = nullptr;
++    const long delay_ms = std::strtol(delay_text, &end, 10);
++    if (end != delay_text && *end == '\0' && delay_ms >= 100 && delay_ms <= 1000) {
++      audio_config.target_playout_delay = std::chrono::milliseconds(delay_ms);
++      video_config.target_playout_delay = std::chrono::milliseconds(delay_ms);
++    }
++  }
++  // Use the HovenCast capture resolution.
++  video_config.resolutions.emplace_back(Resolution{1280, 720});
+ 
+   OSP_VLOG << "Starting session negotiation.";
+   Error negotiation_error;
+@@ -412,6 +423,8 @@ void LoopingFileCastAgent::OnNegotiated(
+     senders.video_config.resolutions = {negotiated_resolution};
+   }
+ 
++  OSP_LOG_INFO << "HOVENCAST_TARGET_DELAY_MS="
++               << senders.video_config.target_playout_delay.count();
+   current_negotiation_ =
+       std::make_unique<SenderSession::ConfiguredSenders>(std::move(senders));
+   if (cast_mode_ == CastMode::kMirroring || is_ready_for_remoting_) {
+diff --git i/cast/standalone_sender/simulated_capturer.cc w/cast/standalone_sender/simulated_capturer.cc
+index 4ec6750..9bfe3ce 100644
+--- i/cast/standalone_sender/simulated_capturer.cc
++++ w/cast/standalone_sender/simulated_capturer.cc
+@@ -8,8 +8,10 @@
+ 
+ #include <algorithm>
+ #include <chrono>
++#include <cstdlib>
+ #include <ratio>
+ #include <sstream>
++#include <string_view>
+ #include <thread>
+ 
+ #include "cast/standalone_common/ffmpeg_glue.h"
+@@ -32,8 +34,13 @@ SimulatedCapturer::SimulatedCapturer(Environment& environment,
+                                      AVMediaType media_type,
+                                      Clock::time_point start_time,
+                                      Observer& observer)
+-    : format_context_(MakeUniqueAVFormatContext(path)),
++    : format_context_(MakeUniqueAVFormatContext(path, AVIOInterruptCB{
++          [](void* opaque) {
++            return static_cast<std::atomic<bool>*>(opaque)->load() ? 1 : 0;
++          }, &stopping_})),
+       now_(environment.now_function()),
++      task_runner_(environment.task_runner()),
++      live_input_(std::string_view(path).starts_with("http://127.0.0.1:")),
+       media_type_(media_type),
+       start_time_(start_time),
+       observer_(observer),
+@@ -68,7 +75,9 @@ SimulatedCapturer::SimulatedCapturer(Environment& environment,
+   // warnings about too many encode threads. FFMPEG's VP8 implementation
+   // actually silently freezes if this is 10 or more. Thus, 8 is used for the
+   // max here, just to be safe.
+-  decoder_context_->thread_count =
++  // Frame-threaded live decoding holds several frames before releasing the
++  // first picture, permanently moving the shared live clock behind capture.
++  decoder_context_->thread_count = live_input_ ? 1 :
+       std::min(std::max<int>(std::thread::hardware_concurrency(), 1), 8);
+   const int params_result = avcodec_parameters_to_context(
+       decoder_context_.get(),
+@@ -85,11 +94,47 @@ SimulatedCapturer::SimulatedCapturer(Environment& environment,
+     return;  // Capturer is halted (unable to start).
+   }
+ 
++  if (live_input_) {
++    read_thread_ = std::thread([this] { ReadLivePackets(); });
++  }
+   next_task_.Schedule([this] { StartDecodingNextFrame(); },
+                       Alarm::kImmediately);
+ }
+ 
+-SimulatedCapturer::~SimulatedCapturer() = default;
++SimulatedCapturer::~SimulatedCapturer() {
++  {
++    std::lock_guard<std::mutex> lock(read_mutex_);
++    stopping_.store(true);
++  }
++  read_condition_.notify_all();
++  if (read_thread_.joinable()) {
++    read_thread_.join();
++  }
++}
++
++void SimulatedCapturer::ReadLivePackets() {
++  for (;;) {
++    {
++      std::unique_lock<std::mutex> lock(read_mutex_);
++      read_condition_.wait(lock, [this] {
++        return stopping_.load() || read_requested_;
++      });
++      if (stopping_.load()) {
++        return;
++      }
++      read_requested_ = false;
++    }
++    // HTTP may wait for the next audio/video PES. Never hold the RTP/RTCP
++    // event loop while waiting for a producer that is running in real time.
++    const int result = av_read_frame(format_context_.get(), packet_.get());
++    auto weak = weak_factory_.GetWeakPtr();
++    task_runner_.PostTask([weak, result] {
++      if (weak) {
++        weak->FinishReadingFrame(result);
++      }
++    });
++  }
++}
+ 
+ void SimulatedCapturer::SetPlaybackRate(double rate) {
+   playback_rate_is_non_zero_ = rate > 0;
+@@ -133,13 +178,28 @@ Clock::duration SimulatedCapturer::ToApproximateClockDuration(
+ }
+ 
+ void SimulatedCapturer::StartDecodingNextFrame() {
+-  if (!playback_rate_is_non_zero_) {
++  if (!playback_rate_is_non_zero_ || read_pending_) {
+     return;
+   }
+ 
+   capture_begin_time_ = now_();
+-  const int read_frame_result =
+-      av_read_frame(format_context_.get(), packet_.get());
++  if (live_input_) {
++    read_pending_ = true;
++    {
++      std::lock_guard<std::mutex> lock(read_mutex_);
++      read_requested_ = true;
++    }
++    read_condition_.notify_one();
++    return;
++  }
++  FinishReadingFrame(av_read_frame(format_context_.get(), packet_.get()));
++}
++
++void SimulatedCapturer::FinishReadingFrame(int read_frame_result) {
++  read_pending_ = false;
++  if (stopping_.load()) {
++    return;
++  }
+   if (read_frame_result < 0) {
+     if (read_frame_result == AVERROR_EOF) {
+       // Insert a "flush request" into the decoder's pipeline, which will
+@@ -165,6 +225,10 @@ void SimulatedCapturer::StartDecodingNextFrame() {
+   const int send_packet_result =
+       avcodec_send_packet(decoder_context_.get(), packet_.get());
+   av_packet_unref(packet_.get());
++  if (live_input_ && send_packet_result == AVERROR_INVALIDDATA) {
++    next_task_.Schedule([this] { StartDecodingNextFrame(); }, Alarm::kImmediately);
++    return;
++  }
+   if (send_packet_result < 0) {
+     // Note: AVERROR(EAGAIN) is also treated as fatal here because
+     // avcodec_receive_frame() will be called repeatedly until its result code
+@@ -181,6 +245,10 @@ void SimulatedCapturer::ConsumeNextDecodedFrame() {
+   const int receive_frame_result =
+       avcodec_receive_frame(decoder_context_.get(), decoded_frame_.get());
+   if (receive_frame_result < 0) {
++    if (live_input_ && receive_frame_result == AVERROR_INVALIDDATA) {
++      next_task_.Schedule([this] { StartDecodingNextFrame(); }, Alarm::kImmediately);
++      return;
++    }
+     switch (receive_frame_result) {
+       case AVERROR(EAGAIN):
+         // This result code, according to libavcodec documentation, means more
+@@ -218,7 +286,41 @@ void SimulatedCapturer::ConsumeNextDecodedFrame() {
+   }
+   last_frame_timestamp_ = frame_timestamp;
+ 
+-  Clock::time_point reference_time = start_time_ + frame_timestamp;
++  static std::optional<Clock::duration> live_timestamp_origin;
++  static Clock::time_point live_clock_origin;
++  if (live_input_ && !live_timestamp_origin) {
++    live_timestamp_origin = frame_timestamp;
++    live_clock_origin = now_();
++    // HovenCast maps the first source video PES to CLOCK_MONOTONIC before
++    // receiver negotiation. Reuse that mapping for both readers so startup
++    // history and decoder probing do not permanently move playback behind.
++    const char* pts_text = std::getenv("HOVENCAST_MEDIA_ORIGIN_PTS_US");
++    const char* clock_text = std::getenv("HOVENCAST_MEDIA_ORIGIN_MONOTONIC_US");
++    if (pts_text && clock_text) {
++      char* pts_end = nullptr;
++      char* clock_end = nullptr;
++      const auto pts_us = std::strtoll(pts_text, &pts_end, 10);
++      const auto clock_us = std::strtoll(clock_text, &clock_end, 10);
++      if (pts_end != pts_text && *pts_end == '\0' && clock_end != clock_text &&
++          *clock_end == '\0' && pts_us >= 0 && clock_us > 0) {
++        live_timestamp_origin = Clock::to_duration(std::chrono::microseconds(pts_us));
++        live_clock_origin = Clock::time_point(
++            Clock::to_duration(std::chrono::microseconds(clock_us)));
++        OSP_LOG_INFO << "HOVENCAST_SOURCE_CLOCK_READY";
++      }
++    }
++  }
++  Clock::time_point reference_time = live_input_
++      ? live_clock_origin + (frame_timestamp - *live_timestamp_origin)
++      : start_time_ + frame_timestamp;
++  // Receiver negotiation and probing can leave old TS history in the relay.
++  // Decode through that history without sending already-expired frames to the
++  // receiver, which would otherwise start the session with a retransmit storm.
++  if (live_input_ && now_() - reference_time > std::chrono::milliseconds(100)) {
++    av_frame_unref(decoded_frame_.get());
++    next_task_.Schedule([this] { ConsumeNextDecodedFrame(); }, Alarm::kImmediately);
++    return;
++  }
+   const auto delay_adjustment_or_null = ProcessDecodedFrame(*decoded_frame_);
+   if (!delay_adjustment_or_null) {
+     av_frame_unref(decoded_frame_.get());
+@@ -226,6 +328,7 @@ void SimulatedCapturer::ConsumeNextDecodedFrame() {
+   }
+   reference_time += *delay_adjustment_or_null;
+ 
++
+   next_task_.Schedule(
+       [this, reference_time] {
+         DeliverDataToClient(*decoded_frame_, capture_begin_time_,
+diff --git i/cast/standalone_sender/simulated_capturer.h w/cast/standalone_sender/simulated_capturer.h
+index 5dcb0bc..879323a 100644
+--- i/cast/standalone_sender/simulated_capturer.h
++++ w/cast/standalone_sender/simulated_capturer.h
+@@ -7,12 +7,18 @@
+ 
+ #include <stdint.h>
+ 
++#include <atomic>
++#include <condition_variable>
++#include <mutex>
++#include <thread>
+ #include <optional>
+ #include <string>
+ #include <vector>
+ 
+ #include "cast/standalone_common/ffmpeg_glue.h"
+ #include "platform/api/time.h"
++#include "platform/api/task_runner.h"
++#include "util/weak_ptr.h"
+ #include "util/alarm.h"
+ 
+ namespace openscreen::cast {
+@@ -85,14 +91,19 @@ class SimulatedCapturer {
+   // Reads the next frame from the file, sends it to the decoder, and schedules
+   // a future ConsumeNextDecodedFrame() call to continue processing.
+   void StartDecodingNextFrame();
++  void FinishReadingFrame(int read_frame_result);
++  void ReadLivePackets();
+ 
+   // Receives the next decoded frame and schedules media delivery to the client,
+   // and/or calls Observer::OnEndOfFile() if there are no more frames in the
+   // file.
+   void ConsumeNextDecodedFrame();
+ 
++  std::atomic<bool> stopping_{false};
+   const AVFormatContextUniquePtr format_context_;
+   ClockNowFunctionPtr now_;
++  TaskRunner& task_runner_;
++  const bool live_input_;
+   const AVMediaType media_type_;  // Audio or Video.
+   const Clock::time_point start_time_;
+   Observer& observer_;
+@@ -115,6 +126,14 @@ class SimulatedCapturer {
+   // Used to determine playback rate. Currently, we only support "playing"
+   // at 1x speed, or "pausing" at 0x speed.
+   bool playback_rate_is_non_zero_ = true;
++  // Only demux reads run off the Cast event thread; decoding and delivery
++  // remain on that thread. At most one packet read can be pending.
++  std::mutex read_mutex_;
++  std::condition_variable read_condition_;
++  bool read_requested_ = false;
++  bool read_pending_ = false;
++  std::thread read_thread_;
++  WeakPtrFactory<SimulatedCapturer> weak_factory_{this};
+ };
+ 
+ // Emits the primary audio stream from a file.
+diff --git i/cast/standalone_sender/streaming_av1_encoder.cc w/cast/standalone_sender/streaming_av1_encoder.cc
+index a2eaeab..8363577 100644
+--- i/cast/standalone_sender/streaming_av1_encoder.cc
++++ w/cast/standalone_sender/streaming_av1_encoder.cc
+@@ -2,6 +2,8 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
++#include <climits>
++
+ #include "cast/standalone_sender/streaming_av1_encoder.h"
+ 
+ #include <aom/aomcx.h>
+diff --git i/cast/standalone_sender/streaming_vpx_encoder.cc w/cast/standalone_sender/streaming_vpx_encoder.cc
+index 4560b11..24f34ed 100644
+--- i/cast/standalone_sender/streaming_vpx_encoder.cc
++++ w/cast/standalone_sender/streaming_vpx_encoder.cc
+@@ -7,6 +7,7 @@
+ #include <vpx/vp8cx.h>
+ 
+ #include <chrono>
++#include <climits>
+ #include <cmath>
+ #include <utility>
+ 
+diff --git i/cast/streaming/impl/bandwidth_estimator_unittest.cc w/cast/streaming/impl/bandwidth_estimator_unittest.cc
+index 72213f5..197cf7b 100644
+--- i/cast/streaming/impl/bandwidth_estimator_unittest.cc
++++ w/cast/streaming/impl/bandwidth_estimator_unittest.cc
+@@ -2,6 +2,8 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
++#include <climits>
++
+ #include "cast/streaming/impl/bandwidth_estimator.h"
+ 
+ #include <chrono>
+diff --git i/cast/streaming/impl/sender_impl.cc w/cast/streaming/impl/sender_impl.cc
+index 6834863..5659bbd 100644
+--- i/cast/streaming/impl/sender_impl.cc
++++ w/cast/streaming/impl/sender_impl.cc
+@@ -261,6 +261,8 @@ void SenderImpl::OnReceivedRtcpPacket(Clock::time_point arrival_time,
+   // This call to Parse() invoke zero or more of the OnReceiverXYZ() methods in
+   // the current call stack:
+   if (rtcp_parser_.Parse(packet, last_enqueued_frame_id_)) {
++    static bool reported = false;
++    if (!reported) { OSP_LOG_INFO << "HOVENCAST_RTCP_RECEIVED"; reported = true; }
+     packet_router_->OnRtcpReceived(arrival_time, round_trip_time_);
+   }
+ }
+diff --git i/cast/streaming/public/sender_session.cc w/cast/streaming/public/sender_session.cc
+index ed083b6..fb8bc55 100644
+--- i/cast/streaming/public/sender_session.cc
++++ w/cast/streaming/public/sender_session.cc
+@@ -9,6 +9,7 @@
+ 
+ #include <algorithm>
+ #include <format>
++#include <cstdlib>
+ #include <iterator>
+ #include <string>
+ #include <utility>
+@@ -613,6 +614,14 @@ std::unique_ptr<Sender> SenderSession::CreateSender(Ssrc receiver_ssrc,
+                        stream.aes_iv_mask,
+                        /* is_pli_enabled*/ true,
+                        ToStreamType(type, config_.use_android_rtp_hack)};
++  if (const char* text = std::getenv("HOVENCAST_CAST_IN_FLIGHT_MS")) {
++    char* end = nullptr;
++    const long milliseconds = std::strtol(text, &end, 10);
++    if (end != text && *end == '\0' && milliseconds >= 66 &&
++        milliseconds <= stream.target_delay.count()) {
++      config.max_in_flight_media_duration = std::chrono::milliseconds(milliseconds);
++    }
++  }
+   OSP_DCHECK(config.IsValid());
+   return std::make_unique<SenderImpl>(*config_.environment, packet_router_,
+                                       std::move(config), type);
+diff --git i/discovery/mdns/impl/mdns_trackers.cc w/discovery/mdns/impl/mdns_trackers.cc
+index c7f078d..4b70ea4 100644
+--- i/discovery/mdns/impl/mdns_trackers.cc
++++ w/discovery/mdns/impl/mdns_trackers.cc
+@@ -2,6 +2,8 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
++#include <climits>
++
+ #include "discovery/mdns/impl/mdns_trackers.h"
+ 
+ #include <array>
+diff --git i/platform/BUILD.gn w/platform/BUILD.gn
+index 294cddb..7ca1dfa 100644
+--- i/platform/BUILD.gn
++++ w/platform/BUILD.gn
+@@ -180,20 +180,7 @@ if (!is_ios) {
+         "impl/udp_socket_reader_posix.cc",
+         "impl/udp_socket_reader_posix.h",
+       ]
+-      sources += [
+-        "impl/quiche_web_transport_client.cc",
+-        "impl/quiche_web_transport_client.h",
+-        "impl/quiche_web_transport_server.cc",
+-        "impl/quiche_web_transport_server.h",
+-        "impl/quiche_web_transport_session.cc",
+-        "impl/quiche_web_transport_session.h",
+-        "impl/quiche_web_transport_stream.cc",
+-        "impl/quiche_web_transport_stream.h",
+-      ]
+-      deps += [
+-        "../third_party/quiche",
+-        "impl/quic:quic_adapters",
+-      ]
++
+     }
+ 
+     if (use_perfetto) {
+diff --git i/util/bit_vector_unittest.cc w/util/bit_vector_unittest.cc
+index d0a89a8..1fb72a4 100644
+--- i/util/bit_vector_unittest.cc
++++ w/util/bit_vector_unittest.cc
+@@ -2,6 +2,8 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
++#include <climits>
++
+ #include "util/bit_vector.h"
+ 
+ #include <algorithm>

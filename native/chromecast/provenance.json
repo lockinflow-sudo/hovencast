@@ -1,0 +1,11 @@
+{
+  "source": "https://github.com/chromium/openscreen",
+  "revision": "8978b74badf042795c07fcf99d0a53dccbd3dcf6",
+  "binary_sha256": "503fba633f36f6fbf32c13d19dbe1913dea9b4dc5e8a1418e70062696d0d336c",
+  "target_playout_delay_ms": 400,
+  "built_for": "current Arch Linux host; system FFmpeg 63, libopus, libvpx",
+  "default_bitrate_bps": 6000000,
+  "default_in_flight_ms": 300,
+  "live_io": "bounded worker reads with FFmpeg cancellation; source clock; skip decoded frames older than 100ms",
+  "verification": "Camera median 562.3 ms at diagnostic 1.2 Mbps. Final installed 720p / 6 Mbps: user confirmed picture and playback on point, smooth cursor and great audio. Native helper compiled, 13 Cast and 23 recorder tests passed; normal Stop/reconnect checked."
+}

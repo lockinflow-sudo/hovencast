@@ -15,12 +15,20 @@ Panel {
   ipcTarget: "hoven.cast"
   manageIpc: false
 
+  property bool setupReady: false
+  property bool setupChecked: false
+  property string setupIssue: ""
+  readonly property string setupCommand: Model.localPath(Qt.resolvedUrl("hovencast-setup"))
   property var receivers: []
   property int selectedIndex: 0
   property bool cursorActive: false
   property string sessionState: "idle"
   property string activeAddress: ""
   property string activeName: ""
+  property var pairingReceiver: null
+  property bool pairingReady: false
+  property bool pairingSubmitted: false
+  property bool pairingCancelled: false
   property string lastError: ""
   property string discoverError: ""
   property string stderrTail: ""
@@ -54,17 +62,25 @@ Panel {
   property int selectedWorkspaceIndex: 0
   property string activeWorkspaceName: ""
   property string workspaceError: ""
+  property bool trayPulseBright: true
 
   readonly property string backendCommand: Model.localPath(Qt.resolvedUrl("omarchy-cast"))
   readonly property string version: Model.version()
+  readonly property string buildTitle: Model.buildTitle()
   readonly property bool sessionActive: sessionState === "awaiting-portal"
     || sessionState === "connecting"
     || sessionState === "streaming"
     || sessionState === "stopping"
+  readonly property bool connectionPending: sessionState === "awaiting-portal"
+    || sessionState === "connecting"
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property color dim: Qt.darker(foreground, 1.45)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
+
+  onConnectionPendingChanged: {
+    if (!connectionPending) trayPulseBright = true
+  }
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -103,7 +119,27 @@ Panel {
     bar.shell.updateEntryInline(moduleName, entry)
   }
 
+  function checkSetup() {
+    if (setupCheckProc.running || sessionActive) return
+    setupCheckProc.command = [setupCommand, "--check"]
+    setupCheckProc.running = true
+  }
+
+  function launchReceiverSetup(script) {
+    if (sessionActive || setupLaunchProc.running) return
+    setupLaunchProc.command = Model.setupLaunchCommand(Model.localPath(Qt.resolvedUrl(script)))
+    setupLaunchProc.running = true
+  }
+
+  function launchSetup() {
+    if (!setupChecked || setupLaunchProc.running || sessionActive) return
+    // Pass the local path as an argument, never interpolate it into shell code.
+    setupLaunchProc.command = Model.setupLaunchCommand(setupCommand)
+    setupLaunchProc.running = true
+  }
+
   function refresh() {
+    if (!setupReady) { checkSetup(); return }
     if (discoverProc.running || sessionActive) return
     discoverError = ""
     sessionState = "discovering"
@@ -113,13 +149,13 @@ Panel {
   }
 
   function refreshWorkspaces() {
-    if (workspaceListProc.running) return
+    if (!setupReady || workspaceListProc.running) return
     workspaceListProc.command = [backendCommand, "workspace-list"]
     workspaceListProc.running = true
   }
 
   function refreshShareSources() {
-    if (sourceListProc.running || sessionActive) return
+    if (!setupReady || sourceListProc.running || sessionActive) return
     sourceError = ""
     sourceListProc.command = [backendCommand, "source-list"]
     sourceListProc.running = true
@@ -185,7 +221,18 @@ Panel {
   }
 
   function connectReceiver(receiver) {
-    if (!receiver || sessionActive || castProc.running) return
+    if (!setupReady || !receiver || sessionActive || castProc.running || pairProc.running) return
+    if (String(receiver.protocol) === "airplay" && !receiver.paired) {
+      pairingReceiver = receiver
+      pairingReady = false
+      pairingSubmitted = false
+      pairingCancelled = false
+      airplayPin.text = ""
+      lastError = ""
+      pairProc.command = [backendCommand, "airplay-pair", "--address", String(receiver.address)]
+      pairProc.running = true
+      return
+    }
     lastError = ""
     stderrTail = ""
     activeAddress = String(receiver.address || "")
@@ -260,7 +307,7 @@ Panel {
   }
 
   function pollSession() {
-    if (sessionStatusProc.running) return
+    if (!setupReady || sessionStatusProc.running) return
     sessionStatusProc.command = [backendCommand, "session-status"]
     sessionStatusProc.running = true
   }
@@ -273,6 +320,7 @@ Panel {
       return
     }
     if (Boolean(status.running)) {
+      lastError = String(status.error || "")
       activeAddress = String(status.address || activeAddress)
       activeName = String(status.receiver || activeName || activeAddress)
       activeWorkspaceName = String(status.workspace || "")
@@ -290,7 +338,8 @@ Panel {
       sessionState = String(status.state || "connecting")
       return
     }
-    if (expectedStop || sessionActive || String(status.state || "") === "error") {
+    if (expectedStop || sessionActive || String(status.state || "") === "error"
+        || (String(status.state || "") === "idle" && sessionState === "error")) {
       if (!expectedStop && String(status.state || "") === "error") {
         lastError = String(status.error || "The wireless display session ended unexpectedly.")
         sessionState = "error"
@@ -497,6 +546,7 @@ Panel {
   }
 
   function activateCursor() {
+    if (!setupReady) { launchSetup(); return }
     if (sessionActive) {
       stopCasting()
       return
@@ -506,6 +556,10 @@ Panel {
 
   function statusJson() {
     return JSON.stringify({
+      buildTitle: root.buildTitle,
+      version: root.version,
+      deviceCount: root.receivers.length,
+      groupedDeviceCount: root.receivers.filter(function(row) { return (row.endpoints || []).length > 1 }).length,
       state: sessionState,
       receiver: activeName,
       address: activeAddress,
@@ -523,15 +577,14 @@ Panel {
 
   Component.onCompleted: {
     displayPlacement = normalizedDisplayPlacement(displayPlacement)
-    pollSession()
-    refresh()
+    checkSetup()
   }
 
   onOpenedChanged: {
     if (!opened) displayPlacementMenuOpen = false
     if (!opened && sourcePickerVisible
         && (sourcePickerPlanning || sourcePickerResult === "pending")) cancelSourcePicker()
-    if (opened && !sessionActive) refresh()
+    if (opened && !sessionActive) checkSetup()
     if (opened) cursorActive = false
     if (opened) refreshWorkspaces()
     if (opened && sourceMode === "window") refreshShareSources()
@@ -549,6 +602,32 @@ Panel {
     repeat: true
     running: true
     onTriggered: root.pollSession()
+  }
+
+  Timer {
+    interval: 2000
+    repeat: true
+    running: root.opened && !root.setupReady
+    onTriggered: root.checkSetup()
+  }
+
+  Process {
+    id: setupLaunchProc
+    onExited: root.checkSetup()
+  }
+
+  Process {
+    id: setupCheckProc
+    stdout: StdioCollector { id: setupStdout; waitForEnd: true }
+    stderr: StdioCollector { id: setupStderr; waitForEnd: true }
+    onExited: function(exitCode, exitStatus) {
+      var result = Model.parseSetup(setupStdout.text)
+      root.setupChecked = true
+      root.setupReady = exitCode === 0 && result.ready
+      root.setupIssue = exitCode === 0 ? result.error
+        : String(setupStderr.text || "Setup could not be checked.").trim()
+      if (root.setupReady) { root.pollSession(); root.refresh() }
+    }
   }
 
   Process {
@@ -700,6 +779,45 @@ Panel {
   }
 
   Process {
+    id: pairProc
+    stdout: SplitParser {
+      onRead: function(line) {
+        var event = Model.parseEvent(line)
+        if (event && event.event === "airplay-pin-required") {
+          root.pairingReady = true
+          airplayPin.forceActiveFocus()
+        }
+      }
+    }
+    stderr: StdioCollector { id: pairError; waitForEnd: true }
+    onExited: function(exitCode, exitStatus) {
+      var receiver = root.pairingReceiver
+      root.pairingReceiver = null
+      root.pairingReady = false
+      if (root.pairingCancelled) return
+      if (exitCode !== 0) {
+        root.lastError = String(pairError.text || "").trim() || "Apple TV pairing failed. Select the TV to retry."
+        return
+      }
+      if (receiver) {
+        receiver.paired = true
+        root.connectReceiver(receiver)
+      }
+    }
+  }
+
+  Process {
+    id: pairPinProc
+    stderr: StdioCollector { id: pairPinError; waitForEnd: true }
+    onExited: function(exitCode, exitStatus) {
+      if (exitCode !== 0) {
+        root.pairingSubmitted = false
+        root.lastError = String(pairPinError.text || "").trim()
+      }
+    }
+  }
+
+  Process {
     id: castProc
     stdout: StdioCollector { waitForEnd: true }
     stderr: StdioCollector {
@@ -769,8 +887,9 @@ Panel {
     }
     function connect(address: string): string {
       for (var i = 0; i < root.receivers.length; i++) {
-        if (String(root.receivers[i].address) === address) {
-          root.connectReceiver(root.receivers[i])
+        var endpoint = Model.endpointByAddress(root.receivers[i], address)
+        if (endpoint !== null) {
+          root.connectReceiver(endpoint)
           return "ok"
         }
       }
@@ -971,6 +1090,14 @@ Panel {
     }
   }
 
+  Timer {
+    interval: 850
+    running: root.connectionPending
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: root.trayPulseBright = !root.trayPulseBright
+  }
+
   BarIconButton {
     id: button
     anchors.fill: parent
@@ -981,15 +1108,23 @@ Panel {
         anchors.fill: parent
         iconColor: root.sessionState === "error"
           ? root.urgent
-          : (root.sessionActive ? root.foreground : root.dim)
+          : (root.connectionPending
+            ? (root.trayPulseBright
+              ? root.foreground
+              : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12))
+            : (root.sessionActive ? root.foreground : root.dim))
+
+        Behavior on iconColor {
+          ColorAnimation { duration: 650; easing.type: Easing.InOutSine }
+        }
       }
     }
     foreground: root.sessionActive ? root.foreground : root.dim
     active: root.sessionState === "error"
     activeColor: root.urgent
     tooltipText: root.sessionActive
-      ? "HovenCast v" + root.version + " · sharing"
-      : "HovenCast v" + root.version
+      ? root.buildTitle + " · sharing"
+      : root.buildTitle
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton && root.sessionActive) root.stopCasting()
       else root.toggle()
@@ -1053,7 +1188,7 @@ Panel {
 
             PanelHero {
               width: parent.width
-              title: "HovenCast v" + root.version
+              title: root.buildTitle
               meta: root.sourcePickerPage === "windows" ? "CHOOSE A WINDOW" : "READY TO SHARE"
               foreground: root.foreground
               fontFamily: root.fontFamily
@@ -1444,8 +1579,10 @@ Panel {
 
           PanelHero {
             width: parent.width
-            title: "HovenCast v" + root.version
-            meta: root.activeName !== ""
+            title: root.buildTitle
+            meta: !root.setupReady
+              ? (root.setupChecked ? "SET UP YOUR SECOND MONITOR" : "CHECKING SETUP")
+              : root.activeName !== ""
               ? root.activeName + " · " + Model.stateLabel(root.sessionState)
               : Model.stateLabel(root.sessionState)
             detail: root.sessionState === "streaming" ? Model.humanBitrate(root.bitrateBps) : ""
@@ -1483,6 +1620,76 @@ Panel {
           PanelSeparator {
             foreground: root.foreground
           }
+
+          Column {
+            visible: !root.setupReady
+            width: parent.width
+            spacing: Style.space(14)
+
+            Text {
+              width: parent.width
+              text: "Your TV. A second Omarchy monitor."
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              font.bold: true
+              wrapMode: Text.WordWrap
+            }
+            Text {
+              width: parent.width
+              text: "Move a workspace to your TV and keep working independently on your laptop."
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              wrapMode: Text.WordWrap
+            }
+            Text {
+              width: parent.width
+              text: "First-use setup installs missing packages, builds the display helper, and backs up your screen-sharing settings. It changes the picker for all applications and restarts screen-sharing services. Review the changes in a terminal before continuing."
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              wrapMode: Text.WordWrap
+            }
+            Text {
+              width: parent.width
+              visible: root.setupIssue !== ""
+              text: root.setupIssue
+              textFormat: Text.PlainText
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
+            CastSurface {
+              width: parent.width
+              implicitHeight: Style.space(48)
+              bordered: true
+              foreground: root.foreground
+              enabled: root.setupChecked && !setupLaunchProc.running
+              Text {
+                anchors.centerIn: parent
+                text: root.setupChecked ? "Review and set up" : "Checking setup…"
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+              }
+              TapHandler { onTapped: root.launchSetup() }
+            }
+            Text {
+              width: parent.width
+              text: "Roku, Fire TV, Google Cast, and paired Apple TV support. Additional receiver setup is available after core setup."
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
+          }
+
+          Column {
+            visible: root.setupReady
+            width: parent.width
+            spacing: Style.space(20)
 
           RowLayout {
             width: parent.width
@@ -1705,7 +1912,7 @@ Panel {
             text: root.sourceMode === "workspace"
               ? (root.sessionState === "streaming"
                 ? "Choose another workspace without reconnecting the TV."
-                : "Put a workspace on a dedicated wireless display.")
+                : "Move a workspace to the TV. Keep using your laptop independently.")
               : "Choose what to share, then select a wireless display."
             color: root.dim
             font.family: root.fontFamily
@@ -2028,6 +2235,56 @@ Panel {
             wrapMode: Text.WordWrap
           }
 
+          Column {
+            visible: root.pairingReceiver !== null
+            width: parent.width
+            spacing: Style.space(8)
+            Text {
+              width: parent.width
+              text: root.pairingSubmitted ? "Finishing Apple TV pairing…"
+                : root.pairingReady ? "Enter the four-digit PIN shown on " + String(root.pairingReceiver ? root.pairingReceiver.name : "Apple TV") + "."
+                : "Waiting for Apple TV to show a pairing PIN…"
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              wrapMode: Text.WordWrap
+              textFormat: Text.PlainText
+            }
+            Row {
+              spacing: Style.space(8)
+              TextField {
+                id: airplayPin
+                width: 110
+                placeholderText: "TV PIN"
+                maximumLength: 4
+                validator: RegularExpressionValidator { regularExpression: /[0-9]{4}/ }
+                enabled: root.pairingReady && !root.pairingSubmitted
+                onAccepted: pairSubmit.clicked()
+              }
+              Button {
+                id: pairSubmit
+                text: "Pair"
+                enabled: root.pairingReady && !root.pairingSubmitted && airplayPin.acceptableInput
+                onClicked: {
+                  if (!enabled || !root.pairingReceiver) return
+                  root.pairingSubmitted = true
+                  pairPinProc.command = [root.backendCommand, "airplay-pin", "--address", String(root.pairingReceiver.address), "--pin", airplayPin.text]
+                  pairPinProc.running = true
+                  airplayPin.text = ""
+                }
+              }
+              Button {
+                text: "Cancel"
+                onClicked: {
+                  root.pairingCancelled = true
+                  pairProc.running = false
+                  root.pairingReceiver = null
+                  airplayPin.text = ""
+                }
+              }
+            }
+          }
+
           Repeater {
             model: root.receivers
 
@@ -2041,7 +2298,7 @@ Panel {
               width: content.width
               implicitHeight: receiverRowContent.implicitHeight + Style.space(28)
               hasCursor: root.cursorActive && root.selectedIndex === index
-              current: selected || root.activeAddress === String(modelData.address || "")
+              current: selected || Model.endpointByAddress(modelData, root.activeAddress) !== null
               foreground: root.foreground
 
               ColumnLayout {
@@ -2098,15 +2355,34 @@ Panel {
 
                   Text {
                     textFormat: Text.PlainText
-                    text: root.activeAddress === String(receiverRow.modelData.address || "")
+                    text: Model.endpointByAddress(receiverRow.modelData, root.activeAddress) !== null
                       ? (root.sessionState === "streaming" ? "SHARING" : "BUSY")
                       : "CONNECT"
-                    color: root.activeAddress === String(receiverRow.modelData.address || "")
+                    color: Model.endpointByAddress(receiverRow.modelData, root.activeAddress) !== null
                       ? root.foreground : root.dim
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption
                     font.bold: true
                     Layout.alignment: Qt.AlignVCenter
+                  }
+                }
+
+                RowLayout {
+                  visible: (receiverRow.modelData.endpoints || []).length > 1
+                  Layout.fillWidth: true
+                  spacing: Style.space(8)
+                  Repeater {
+                    model: receiverRow.modelData.endpoints || []
+                    Button {
+                      required property var modelData
+                      Layout.fillWidth: true
+                      text: Model.connectionLabel(modelData.protocol)
+                      enabled: !root.sessionActive
+                      onClicked: {
+                        root.selectReceiver(receiverRow.index)
+                        root.connectReceiver(modelData)
+                      }
+                    }
                   }
                 }
 
@@ -2158,7 +2434,7 @@ Panel {
 
                   Text {
                     Layout.fillWidth: true
-                    text: Model.connectionLabel(receiverRow.modelData.protocol)
+                    text: receiverRow.modelData.protocol === "airplay" && !receiverRow.modelData.paired ? "PAIR APPLE TV" : receiverRow.modelData.protocol === "airplay" ? "AIRPLAY · BETA" : Model.connectionSummary(receiverRow.modelData)
                     textFormat: Text.PlainText
                     color: root.foreground
                     font.family: root.fontFamily
@@ -2177,7 +2453,7 @@ Panel {
               TapHandler {
                 onTapped: {
                   root.selectReceiver(receiverRow.index)
-                  if (root.activeAddress === String(receiverRow.modelData.address || "") && root.sessionActive)
+                  if (Model.endpointByAddress(receiverRow.modelData, root.activeAddress) !== null && root.sessionActive)
                     root.stopCasting()
                   else if (!root.sessionActive)
                     root.connectReceiver(receiverRow.modelData)
@@ -2201,7 +2477,7 @@ Panel {
             width: parent.width
             text: root.sessionActive
               ? "Right-click the bar icon or press S here to stop sharing."
-              : "Select a display, then choose what you want to share in HovenCast."
+              : "Choose a workspace, then a supported TV. Your laptop keeps its own workspace."
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -2212,6 +2488,34 @@ Panel {
             width: parent.width
             height: Style.space(4)
           }
+          Text {
+            width: parent.width
+            text: "Additional receivers"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+          Repeater {
+            model: [ { label: "Set up Google Cast", script: "hovencast-chromecast-setup" },
+                     { label: "Set up Apple TV", script: "hovencast-airplay-setup" } ]
+            delegate: CastSurface {
+              required property var modelData
+              width: parent.width
+              implicitHeight: Style.space(40)
+              bordered: true
+              foreground: root.foreground
+              enabled: !root.sessionActive && !setupLaunchProc.running
+              Text {
+                anchors.centerIn: parent
+                text: modelData.label
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+              }
+              TapHandler { onTapped: root.launchReceiverSetup(modelData.script) }
+            }
+          }
+          } // configured controls
           }
         }
       }

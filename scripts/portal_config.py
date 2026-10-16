@@ -100,6 +100,8 @@ def atomic_write(path: pathlib.Path, text: str, mode: int = 0o644) -> None:
     try:
         with os.fdopen(handle, "w", encoding="utf-8") as stream:
             stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
         os.chmod(temporary, mode)
         os.replace(temporary, path)
     finally:
@@ -125,7 +127,10 @@ def install(picker: pathlib.Path) -> None:
         _, current = read_values(lines)
         old_picker = str(state["installed_picker"])
         current_picker = current["custom_picker_binary"]
-        if current_picker["present"] and current_picker["value"] not in {old_picker, str(picker)}:
+        allowed = {old_picker, str(picker)}
+        if state.get("pending"):
+            allowed.add(str(state.get("pending_previous_picker", "")))
+        if current_picker["present"] and current_picker["value"] not in allowed:
             raise RuntimeError(
                 "custom_picker_binary changed after HovenCast setup; remove or reconcile it before reinstalling"
             )
@@ -143,8 +148,16 @@ def install(picker: pathlib.Path) -> None:
         state_root.mkdir(mode=0o700, parents=True, exist_ok=True)
         atomic_write(backup_file, original_text, mode)
 
+    _, current = read_values(lines)
+    state["setup_complete"] = False
+    state["pending"] = True
+    state["pending_previous_picker"] = current["custom_picker_binary"]["value"]
     lines = set_value(lines, "custom_picker_binary", str(picker))
+    # Persist recovery information before changing the user configuration.
+    atomic_write(state_file, json.dumps(state, indent=2, sort_keys=True) + "\n", 0o600)
     atomic_write(target, "\n".join(lines).rstrip() + "\n", mode)
+    state.pop("pending", None)
+    state.pop("pending_previous_picker", None)
     atomic_write(state_file, json.dumps(state, indent=2, sort_keys=True) + "\n", 0o600)
     print(f"Configured {target} to use {picker}")
 

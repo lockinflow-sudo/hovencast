@@ -1,15 +1,4 @@
 #!/bin/bash
-
 set -euo pipefail
-
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-
-if pgrep -af "$root/omarchy-cast" >/dev/null 2>&1; then
-  echo "HovenCast is still running. Stop casting and disable hoven.cast before uninstalling." >&2
-  exit 1
-fi
-
-python "$root/scripts/portal_config.py" remove
-systemctl --user restart xdg-desktop-portal-hyprland.service xdg-desktop-portal.service
-
-echo "HovenCast cleanup complete. You can now run: omarchy plugin remove hoven.cast"
+exec python "$root/scripts/setup.py" --uninstall "$@"

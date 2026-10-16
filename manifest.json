@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "hoven.cast",
   "name": "HovenCast",
-  "version": "0.2.0",
+  "version": "2.5.0",
   "author": "Sean Hovenkamp",
   "license": "MIT",
-  "description": "Extend Omarchy with a dedicated workspace or share a desktop, window, or selected area with compatible Roku TVs.",
+  "description": "Turn your TV into a wireless second Omarchy monitor, with independent workspaces and audio. Supports compatible Roku, Fire TV, Google Cast, and paired Apple TV receivers.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "HovenCast",
-    "description": "Extend your display or share selected screen content with a compatible Roku TV.",
+    "description": "Turn your TV into a wireless second Omarchy monitor, with independent workspaces and audio. Supports compatible Roku, Fire TV, Google Cast, and paired Apple TV receivers.",
     "category": "Network",
     "allowMultiple": false,
     "defaultSection": "right",

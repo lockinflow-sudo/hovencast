@@ -26,6 +26,32 @@ function qmlObjectBlock(source, type, id) {
 }
 
 assert.equal(model.version(), manifest.version)
+assert.equal(manifest.name, "HovenCast")
+assert.equal(manifest.barWidget.displayName, manifest.name)
+assert.match(manifest.version, /^\d+\.\d+\.\d+$/)
+assert.equal(model.buildTitle(), manifest.name + " v" + manifest.version)
+const panelSource = fs.readFileSync(path.join(__dirname, "..", "Panel.qml"), "utf8")
+assert.match(panelSource, /readonly property string buildTitle: Model\.buildTitle\(\)/)
+assert.equal((panelSource.match(/title: root\.buildTitle/g) || []).length, 2)
+assert.match(panelSource, /tooltipText:[\s\S]*?root\.buildTitle \+ " · sharing"/)
+assert.doesNotMatch(panelSource, /"HovenCast v"/)
+assert.match(panelSource, /buildTitle: root\.buildTitle/)
+assert.match(panelSource, /groupedDeviceCount:/)
+
+const grouped = model.parseDiscovery(JSON.stringify({receivers: [{
+  name: "Living room", address: "192.0.2.1", port: 7250, protocol: "miracast-mice",
+  endpoints: [
+    {name: "Living room", address: "192.0.2.1", port: 7250, protocol: "miracast-mice"},
+    {name: "Living room", address: "p2p:02:00:00:00:00:01", port: 7236, interface: "p2p-dev-wlan0", protocol: "miracast-p2p"}
+  ]
+}]})).receivers[0]
+assert.equal(grouped.endpoints.length, 2)
+assert.equal(grouped.address, "192.0.2.1")
+assert.equal(model.endpointByAddress(grouped, "p2p:02:00:00:00:00:01").protocol, "miracast-p2p")
+assert.equal(model.endpointByAddress(grouped, "missing"), null)
+assert.equal(model.connectionSummary(grouped), "LOCAL NETWORK + WI-FI DIRECT")
+assert.match(panelSource, /root\.connectReceiver\(modelData\)/)
+assert.match(panelSource, /Model\.endpointByAddress\(modelData, root\.activeAddress\)/)
 
 const discovery = model.parseDiscovery(JSON.stringify({
   receivers: [
@@ -107,4 +133,13 @@ assert.equal(model.humanBitrate(6100000), "6.1 Mbps")
 assert.equal(model.stateLabel("streaming"), "SHARING YOUR SCREEN")
 assert.equal(model.localPath("file:///tmp/HovenCast%20Test/omarchy-cast"), "/tmp/HovenCast Test/omarchy-cast")
 
+assert.deepEqual(model.parseSetup('{"ready":true,"issues":[]}'), {ready: true, error: ""})
+assert.deepEqual(model.parseSetup('{"ready":false,"issues":["Build helper","Set up portal"]}'),
+  {ready: false, error: "Build helper\nSet up portal"})
+assert.equal(model.parseSetup('{"ready":"true","issues":[]}').ready, false)
+assert.equal(model.parseSetup('bad').ready, false)
 console.log("model tests passed")
+
+assert.equal(model.protocolName("airplay"), "AIRPLAY")
+assert.equal(model.connectionLabel("airplay"), "LOCAL NETWORK")
+assert.equal(model.parseDiscovery(JSON.stringify({receivers:[{name:"Apple TV",address:"airplay:00:11:22:33:44:55@192.0.2.1",protocol:"airplay",paired:true}]})).receivers[0].paired, true)

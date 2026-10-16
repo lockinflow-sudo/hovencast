@@ -1,0 +1,23 @@
+#!/usr/bin/bash
+set -euo pipefail
+root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+if (( $# > 0 )); then
+  [[ $# -eq 2 && $1 == --wifi-compat-adapter && $2 =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,14}$ ]] || {
+    echo "Usage: install-p2p-helper [--wifi-compat-adapter INTERFACE]" >&2
+    exit 2
+  }
+fi
+if [[ $EUID -ne 0 ]]; then
+  # One administrative approval at installation, not one per cast/retry.
+  exec /usr/bin/pkexec /usr/bin/bash "$root/scripts/install-p2p-helper" "$@"
+fi
+if (( $# > 0 )); then
+  /usr/bin/python -I "$root/scripts/wifi_compat.py" install --interface "$2"
+fi
+/usr/bin/install -D -o root -g root -m 0644 "$root/scripts/p2p_helper.py" /usr/local/libexec/hovencast-p2p-helper.py
+/usr/bin/install -D -o root -g root -m 0755 "$root/scripts/hovencast-p2p-helper" /usr/local/libexec/hovencast-p2p-helper
+/usr/bin/install -D -o root -g root -m 0644 "$root/scripts/org.hovencast.p2p.policy" /usr/share/polkit-1/actions/org.hovencast.p2p.policy
+# Install the grant last. Polkit watches actions/rules and reloads automatically.
+/usr/bin/install -D -o root -g root -m 0644 "$root/scripts/49-hovencast-p2p.rules" /etc/polkit-1/rules.d/49-hovencast-p2p.rules
+echo "Installed HovenCast's scoped active-local-session P2P authorization."
+bash "$root/scripts/install-metadata-helper"

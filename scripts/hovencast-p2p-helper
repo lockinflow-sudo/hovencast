@@ -1,0 +1,3 @@
+#!/usr/bin/sh
+# Fixed root-owned entry point. Caller arguments are data, never Python options.
+exec /usr/bin/python -I /usr/local/libexec/hovencast-p2p-helper.py "$@"

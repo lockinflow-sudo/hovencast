@@ -15,6 +15,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -29,16 +30,23 @@ from gi.repository import Gio, GLib, GLibUnix, Gst, Xdp  # noqa: E402
 from omarchy_cast_protocol import (
     VideoMode,
     choose_video_mode,
+    p2p_video_mode,
+    live_remux_command,
     discover_mice_receivers,
     enrich_receiver_details,
     probe_wfd_capabilities,
 )
+from p2p_backend import P2PLink, discover_receivers as discover_p2p_receivers
+from automatic_devices import discover_rows, network_snapshot
 from virtual_workspace import VirtualWorkspace, guard
+from video_timing_trace import VideoTimingTrace
 
 APP_ROOT = pathlib.Path(__file__).resolve().parents[1]
-APP_VERSION = json.loads(
+APP_METADATA = json.loads(
     (APP_ROOT / "manifest.json").read_text(encoding="utf-8")
-)["version"]
+)
+APP_VERSION = APP_METADATA["version"]
+APP_NAME = APP_METADATA["name"]
 SESSION_MAX_ATTEMPTS = 3
 STARTUP_FRAME_DEADLINE_SECONDS = 8
 
@@ -644,6 +652,8 @@ class Recorder:
         mute_local_audio: bool = False,
         mirror_output: pathlib.Path | None = None,
         video_mode: VideoMode | None = None,
+        sender_early: bool = False,
+        p2p_pipeline: bool = False,
     ) -> None:
         self.output = output
         self.duration = duration
@@ -673,6 +683,10 @@ class Recorder:
         self.video_profile = video_profile
         self.video_mode = video_mode
         self.sender_start = sender_start
+        self.sender_early = sender_early
+        self.p2p_pipeline = p2p_pipeline
+        self.video_trace = (VideoTimingTrace(lambda **fields: emit(self.event_file, "video-stage", **fields))
+                            if os.environ.get("HOVENCAST_VIDEO_TRACE") == "1" else None)
         self.sender_process: subprocess.Popen[bytes] | None = None
         self.auxiliary_processes: list[subprocess.Popen[bytes]] = []
         self.audio_route = SilentAudioRoute(event_file) if mute_local_audio else None
@@ -683,6 +697,10 @@ class Recorder:
         self.stopping = False
 
     def start(self) -> int:
+        # Standard Miracast sinks can initiate RTSP as soon as pairing completes.
+        # Do not leave the listening socket waiting on a portal picker response.
+        if self.sender_early and not self._launch_sender():
+            return self.exit_code
         emit(self.event_file, "portal-requested", source="monitor", cursor="embedded")
         self.portal.create_screencast_session(
             Xdp.OutputType.MONITOR,
@@ -696,8 +714,41 @@ class Recorder:
         )
         GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, self._interrupted)
         GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, self._interrupted)
+        GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, self._start_live_trace)
         self.loop.run()
         return self.exit_code
+
+    def _forward_sender_events(self) -> None:
+        stream = getattr(self.sender_process, "stdout", None)
+        if stream is None:
+            return
+        while True:
+            line = stream.readline(65537)
+            if not line:
+                return
+            if len(line) > 65536:
+                continue
+            try:
+                record = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if isinstance(record, dict) and record.get("event") == "receiver-state":
+                emit(self.event_file, "receiver-state", detail=str(record.get("detail", "")))
+
+    def _launch_sender(self) -> bool:
+        if not self.sender_start or self.sender_process is not None:
+            return True
+        try:
+            self.sender_process, self.auxiliary_processes = self.sender_start()
+            emit(self.event_file, "sender-started", pid=self.sender_process.pid)
+            if getattr(self.sender_process, "stdout", None) is not None:
+                threading.Thread(target=self._forward_sender_events, daemon=True).start()
+            for process in self.auxiliary_processes:
+                emit(self.event_file, "transport-process-started", pid=process.pid)
+        except (OSError, subprocess.SubprocessError, RuntimeError, GLib.Error) as error:
+            self._fail("sender-start-failed", error)
+            return False
+        return True
 
     def _portal_created(self, portal: Xdp.Portal, result: Gio.AsyncResult, _data: Any) -> None:
         try:
@@ -742,18 +793,22 @@ class Recorder:
             return
         audio_device = audio_source.replace("\\", "\\\\").replace('"', '\\"')
         output = str(self.output).replace("\\", "\\\\").replace('"', '\\"')
+        p2p_pipeline = getattr(self, "p2p_pipeline", False)
+        # Flush live transport chunks immediately. A static desktop can take
+        # seconds to fill filesink's default 64 KiB buffer.
+        transport_buffering = "buffer-mode=unbuffered" if (p2p_pipeline or getattr(self, "cast_transport", False)) else ""
         if self.mirror_output:
             mirror = str(self.mirror_output).replace("\\", "\\\\").replace('"', '\\"')
             sink_description = f"""
                 mpegtsmux name=mux alignment=7 pat-interval=9000 pmt-interval=9000
                     ! tee name=transport
-                transport. ! queue ! filesink location="{output}" sync=false
+                transport. ! queue ! filesink location="{output}" sync=false {transport_buffering}
                 transport. ! queue ! filesink location="{mirror}" sync=false
             """
         else:
             sink_description = f"""
                 mpegtsmux name=mux alignment=7 pat-interval=9000 pmt-interval=9000
-                    ! filesink location="{output}" sync=false
+                    ! filesink location="{output}" sync=false {transport_buffering}
             """
         if self.video_profile not in {"baseline", "high"}:
             self._fail("pipeline-create-failed", RuntimeError(f"unsupported H.264 profile: {self.video_profile}"))
@@ -767,19 +822,8 @@ class Recorder:
                 RuntimeError(f"unsupported encoder preset: {mode.encoder_preset}"),
             )
             return
-        if self.sender_start:
-            try:
-                self.sender_process, self.auxiliary_processes = self.sender_start()
-                emit(self.event_file, "sender-started", pid=self.sender_process.pid)
-                for process in self.auxiliary_processes:
-                    emit(
-                        self.event_file,
-                        "transport-process-started",
-                        pid=process.pid,
-                    )
-            except (OSError, subprocess.SubprocessError) as error:
-                self._fail("sender-start-failed", error)
-                return
+        if not self._launch_sender():
+            return
         window_crop_description = ""
         if self.source_kind == "window":
             if not self.window_address or not self.window_output:
@@ -798,6 +842,13 @@ class Recorder:
             window_crop_description = f"""
                 ! videocrop name=window_crop left={self.window_crop.left} right={self.window_crop.right} top={self.window_crop.top} bottom={self.window_crop.bottom}
             """
+        # Keep encoded audio intact: dropping it to meet a raw-video latency
+        # budget leaves timestamp holes and can stall the interleaving mux.
+        mux_queue_time_ns = max(mode.queue_time_ns, 250_000_000) if p2p_pipeline else mode.queue_time_ns
+        audio_queue_options = (
+            f"max-size-time={mux_queue_time_ns}"
+            if p2p_pipeline else f"max-size-time={mode.queue_time_ns} leaky=downstream"
+        )
         description = f"""
             pipewiresrc fd={pipewire_fd} path={node_id} do-timestamp=true keepalive-time=33 name=portal_video
                 ! queue name=video_capture_queue max-size-buffers=3 leaky=downstream
@@ -807,20 +858,20 @@ class Recorder:
                 ! videorate name=video_rate
                 ! capsfilter name=video_output_caps caps-change-mode=delayed caps="video/x-raw,format=I420,width={mode.width},height={mode.height},framerate=30/1,pixel-aspect-ratio=1/1"
                 ! queue name=video_encode_queue max-size-time={mode.queue_time_ns} leaky=downstream
-                ! x264enc name=video_encoder tune=zerolatency speed-preset={mode.encoder_preset} option-string=level=4.0 cabac=true dct8x8=true bitrate={mode.bitrate_kbps} vbv-buf-capacity={mode.vbv_buffer_ms} key-int-max=30 bframes=0 byte-stream=true aud=true
+                ! x264enc name=video_encoder tune=zerolatency speed-preset={mode.encoder_preset} option-string=level=4.0 cabac=true dct8x8=true bitrate={mode.bitrate_kbps} vbv-buf-capacity={mode.vbv_buffer_ms} key-int-max={15 if getattr(self, "cast_transport", False) else 30} bframes=0 byte-stream=true aud=true
                 ! video/x-h264,profile={self.video_profile},stream-format=byte-stream,alignment=au
                 ! h264parse name=encoded_video config-interval=-1
-                ! queue name=video_mux_queue max-size-time={mode.queue_time_ns}
+                ! queue name=video_mux_queue max-size-time={mux_queue_time_ns}
                 ! mux.sink_256
             pulsesrc device="{audio_device}" do-timestamp=true name=desktop_audio
-                ! queue max-size-time={mode.queue_time_ns} leaky=downstream
+                ! queue name=audio_capture_queue {audio_queue_options}
                 ! audioconvert
                 ! audioresample
                 ! audio/x-raw,format=S16LE,rate=48000,channels=2
                 ! fdkaacenc bitrate=192000 afterburner=true
                 ! audio/mpeg,mpegversion=4,stream-format=raw
                 ! aacparse name=encoded_audio
-                ! queue max-size-time={mode.queue_time_ns}
+                ! queue name=audio_mux_queue max-size-time={mux_queue_time_ns}
                 ! mux.sink_257
             {sink_description}
         """
@@ -829,6 +880,7 @@ class Recorder:
             if not isinstance(parsed, Gst.Pipeline):
                 raise RuntimeError("GStreamer did not create a pipeline")
             self.pipeline = parsed
+            self._install_video_trace_probes()
             self._add_probe("portal_video", self._capture_probe)
             self._add_probe(
                 "portal_video",
@@ -879,7 +931,7 @@ class Recorder:
                         "audiotestsrc",
                         "wave=sine",
                         "freq=440",
-                        "volume=0.05",
+                        "volume=0.15" if getattr(self, "cast_transport", False) else "volume=0.05",
                         "!",
                         "audioconvert",
                         "!",
@@ -892,6 +944,15 @@ class Recorder:
                 )
                 emit(self.event_file, "test-tone-started", frequency_hz=440)
             GLib.timeout_add_seconds(1, self._metrics)
+            state = read_cast_session_state()
+            if state and state.get("pid") == os.getppid():
+                try:
+                    atomic_json(cast_session_path("video-trace.control.json"), {
+                        "session_pid": state["pid"], "session_start_ticks": state["start_ticks"],
+                        "recorder_pid": os.getpid(), "recorder_start_ticks": process_start_ticks(os.getpid()),
+                    })
+                except OSError as error:
+                    emit(self.event_file, "video-trace-control-error", error=str(error))
             GLib.timeout_add(250, self._check_sender)
             if self.source_kind == "window":
                 GLib.timeout_add(200, self._update_window_crop)
@@ -899,6 +960,36 @@ class Recorder:
                 GLib.timeout_add_seconds(self.duration, self._finish_duration)
         except (GLib.Error, RuntimeError, subprocess.SubprocessError) as error:
             self._fail("pipeline-create-failed", error)
+
+    def _install_video_trace_probes(self) -> None:
+        # Install once, dormant until requested; restarting a trace never adds probes.
+        for element_name, stage in (("portal_video", "capture"),
+                                   ("video_encode_queue", "encode-input"),
+                                   ("encoded_video", "encode-output"),
+                                   ("mux", "mux-output")):
+            def trace_pad(_pad, info, stage=stage):
+                trace = self.video_trace
+                if trace is None:
+                    return Gst.PadProbeReturn.OK
+                buffers = []
+                if info.type & Gst.PadProbeType.BUFFER_LIST:
+                    items = info.get_buffer_list()
+                    if items is not None:
+                        buffers = [items.get(i) for i in range(items.length())]
+                else:
+                    buffer = info.get_buffer()
+                    if buffer is not None:
+                        buffers = [buffer]
+                for buffer in buffers:
+                    if stage == "mux-output":
+                        trace.record_transport(buffer.extract_dup(0, buffer.get_size()))
+                    else:
+                        trace.record(stage,
+                            None if buffer.pts == Gst.CLOCK_TIME_NONE else int(buffer.pts),
+                            None if buffer.duration == Gst.CLOCK_TIME_NONE else int(buffer.duration))
+                return Gst.PadProbeReturn.OK
+            self._add_probe(element_name, trace_pad,
+                            Gst.PadProbeType.BUFFER | Gst.PadProbeType.BUFFER_LIST)
 
     def _add_probe(
         self,
@@ -961,6 +1052,8 @@ class Recorder:
                 self.counters.capture_pts_ns = int(buffer.pts)
             if self.counters.first_capture_monotonic is None:
                 self.counters.first_capture_monotonic = now
+                if self.video_trace is not None:
+                    consume_video_trace_request()
                 emit(self.event_file, "first-capture", latency_ms=self._latency_ms())
         return Gst.PadProbeReturn.OK
 
@@ -1093,6 +1186,24 @@ class Recorder:
         bitrate = (total_bytes - self.previous_bytes) * 8
         self.previous_bytes = total_bytes
         drift_ms = None
+        video_progress_lag_ms = None
+        if self.counters.first_video_monotonic is not None and self.counters.first_video_pts_ns is not None and self.counters.video_pts_ns is not None:
+            video_progress_lag_ms = round(
+                (time.monotonic() - self.counters.first_video_monotonic) * 1000
+                - (self.counters.video_pts_ns - self.counters.first_video_pts_ns) / 1_000_000, 3)
+        queue_ms = {}
+        audio_device_ms = {}
+        if getattr(self, "pipeline", None):
+            for name in ("video_capture_queue", "video_encode_queue", "video_mux_queue", "audio_capture_queue", "audio_mux_queue"):
+                element = self.pipeline.get_by_name(name)
+                if element:
+                    queue_ms[name] = round(element.get_property("current-level-time") / 1_000_000, 3)
+            audio_source = self.pipeline.get_by_name("desktop_audio")
+            if audio_source:
+                for name in ("actual-buffer-time", "actual-latency-time"):
+                    actual_us = audio_source.get_property(name)
+                    if actual_us >= 0:
+                        audio_device_ms[name] = round(actual_us / 1000, 3)
         capture_idle_ms = None
         if self.counters.last_capture_monotonic is not None:
             capture_idle_ms = round(
@@ -1110,6 +1221,9 @@ class Recorder:
         emit(
             self.event_file,
             "metrics",
+            video_progress_lag_ms=video_progress_lag_ms,
+            queue_ms=queue_ms,
+            audio_device_ms=audio_device_ms,
             capture_frames=self.counters.capture_frames,
             capture_idle_ms=capture_idle_ms,
             video_frames=self.counters.video_frames,
@@ -1276,6 +1390,18 @@ class Recorder:
         if not self.stopping:
             self._fail("portal-closed", RuntimeError("the portal session was closed"))
 
+    def _start_live_trace(self) -> bool:
+        if self.stopping or self.pipeline is None:
+            return GLib.SOURCE_CONTINUE
+        try:
+            if self.sender_process is not None and self.sender_process.poll() is None:
+                self.sender_process.send_signal(signal.SIGUSR1)
+            self.video_trace = VideoTimingTrace(lambda **fields: emit(self.event_file, "video-stage", **fields))
+            emit(self.event_file, "video-trace-started", seconds=90)
+        except (OSError, subprocess.SubprocessError) as error:
+            emit(self.event_file, "video-trace-error", error=str(error))
+        return GLib.SOURCE_CONTINUE
+
     def _interrupted(self) -> bool:
         self.exit_code = 130
         self._stop("signal")
@@ -1314,7 +1440,8 @@ class Recorder:
         # Close the receiver and every FIFO consumer before stopping GStreamer.
         # Otherwise a filesink blocked on a full FIFO can make set_state(NULL)
         # wait forever and leave both the TV session and audio routing stranded.
-        self._stop_process(self.sender_process, "receiver")
+        self._stop_process(self.sender_process, "receiver",
+                           grace_seconds=4 if getattr(self, "cast_transport", False) else 2)
         for index, process in enumerate(self.auxiliary_processes):
             self._stop_process(process, f"transport-{index}")
         if self.pipeline:
@@ -1473,7 +1600,30 @@ def run_verify(args: argparse.Namespace) -> int:
 
 
 def run_discover(_args: argparse.Namespace) -> int:
-    receivers = [receiver.json() for receiver in enrich_receiver_details(discover_mice_receivers())]
+    client = initial = None
+    try:
+        client = P2PLink().client
+        initial = network_snapshot(client)
+    except (RuntimeError, GLib.Error):
+        pass
+    lan_seen = time.monotonic()
+    lan = enrich_receiver_details(discover_mice_receivers())
+    peers = []
+    try:
+        peers = discover_p2p_receivers()
+    except (RuntimeError, TimeoutError, GLib.Error) as error:
+        print(f"Wi-Fi Direct discovery unavailable: {error}", file=sys.stderr)
+    receivers = discover_rows(lan, peers, lan_seen=lan_seen, client=client, initial=initial)
+    try:
+        from chromecast_transport import discover_receivers as discover_cast
+        receivers.extend(discover_cast())
+    except (ImportError, OSError, RuntimeError) as error:
+        print(f"Google Cast discovery unavailable: {error}", file=sys.stderr)
+    try:
+        from airplay_transport import discover_receivers as discover_airplay
+        receivers.extend(discover_airplay())
+    except Exception as error:
+        print(f"Apple TV discovery unavailable: {error}", file=sys.stderr)
     print(json.dumps({"receivers": receivers}, indent=2, sort_keys=True))
     return 0
 
@@ -1598,14 +1748,67 @@ def run_cast_artifact(args: argparse.Namespace) -> int:
 
 
 def run_cast_live(args: argparse.Namespace) -> int:
+    if not args.address.startswith("p2p:"):
+        return _run_cast_live_connected(args)
+    # Pair before changing the desktop, opening the portal, or routing audio.
+    # A visible receiver is not yet a connected display.
+    event_path = cast_session_path("session.events.jsonl")
+    attempt = max(1, int(os.environ.get("HOVENCAST_ATTEMPT", "1") or 1))
+    cancelled = False
+
+    def cancel_pairing(_signum: int, _frame: Any) -> None:
+        nonlocal cancelled
+        cancelled = True
+
+    previous_handlers = {
+        signum: signal.signal(signum, cancel_pairing)
+        for signum in (signal.SIGINT, signal.SIGTERM)
+    }
+    link = None
+    try:
+        with event_path.open("w" if attempt == 1 else "a", encoding="utf-8") as events:
+            emit(events, "p2p-connecting", receiver=args.address)
+            try:
+                link = P2PLink()
+                link.connect(
+                    args.address, cancelled=lambda: cancelled,
+                    progress=lambda **fields: emit(events, "p2p-link-state", **fields),
+                )
+                if cancelled:
+                    raise InterruptedError("Wi-Fi Direct connection cancelled")
+            except (OSError, RuntimeError, GLib.Error) as error:
+                emit(events, "sender-start-failed", error=str(error))
+                return 1
+            emit(events, "p2p-connected", interface=link.interface,
+                 local_address=link.local_address, receiver_address=link.address)
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
+        return _run_cast_live_connected(args, link)
+    finally:
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
+        if link:
+            link.close()
+
+
+def _run_cast_live_connected(args: argparse.Namespace, p2p_link: P2PLink | None = None) -> int:
     root = pathlib.Path(__file__).resolve().parents[1]
     helper = root / "build" / "wfd-sender"
-    if not helper.is_file():
+    is_cast = args.address.startswith(("cast:", "airplay:"))
+    if not is_cast and not helper.is_file():
         raise RuntimeError("run ./hovencast-setup before casting")
     session_root = runtime_root(required=True)
     assert session_root is not None
     event_path = session_root / "session.events.jsonl"
-    video_mode = choose_video_mode(args.address, args.quality)
+    is_p2p = args.address.startswith("p2p:")
+    # P2P receivers have no Roku ECP metadata. Use the initial interoperability
+    # profile unless the caller explicitly selects a resolution.
+    video_mode = choose_video_mode(
+        args.address if not (is_p2p or is_cast) else "",
+        "720p" if (is_p2p or is_cast) and args.quality == "auto" else args.quality,
+    )
+    if is_p2p:
+        video_mode = p2p_video_mode(video_mode)
     virtual_workspace: VirtualWorkspace | None = None
     guard_process: subprocess.Popen[bytes] | None = None
     picker_target_request: pathlib.Path | None = None
@@ -1668,55 +1871,49 @@ def run_cast_live(args: argparse.Namespace) -> int:
             def start_sender() -> tuple[
                 subprocess.Popen[bytes], list[subprocess.Popen[bytes]]
             ]:
+                if is_cast:
+                    sender = subprocess.Popen([
+                        sys.executable, str(root / ("src/airplay_transport.py" if args.address.startswith("airplay:") else "src/chromecast_transport.py")),
+                        "--address", args.address, "--input", str(raw_transport_fifo),
+                        "--folder", runtime_dir, "--events", str(session_root / "cast-transport.events.jsonl"),
+                    ])
+                    return sender, []
                 environment = dict(os.environ)
                 environment["OMARCHY_CAST_FRIENDLY_NAME"] = args.name
                 environment["OMARCHY_CAST_SOURCE_ID"] = args.source_id
                 environment["OMARCHY_CAST_CEA_MODE"] = video_mode.cea_bitmap
+                receiver_address = args.address
+                if is_p2p:
+                    assert p2p_link is not None
+                    receiver_address = p2p_link.address or p2p_link.local_address
+                    environment["HOVENCAST_TRANSPORT"] = "miracast-p2p"
+                    environment["HOVENCAST_P2P_LOCAL_ADDRESS"] = p2p_link.local_address
+                    environment["HOVENCAST_P2P_NETWORK"] = p2p_link.network
                 sender_timeout = args.duration + 30 if args.duration > 0 else 0
+                # The live capture already emits H.264/AAC MPEG-TS with PCR.
+                # Feed it directly to the PCR-timed P2P sender instead of
+                # remuxing through a second FIFO and FFmpeg packet queues.
+                sender_input = raw_transport_fifo if is_p2p else transport_fifo
                 sender = subprocess.Popen(
-                    [str(helper), args.address, str(transport_fifo), str(sender_timeout)],
-                    env=environment,
+                    [str(helper), receiver_address, str(sender_input), str(sender_timeout)],
+                    env=environment, stdout=subprocess.PIPE, text=True, bufsize=1,
                 )
+                if is_p2p:
+                    return sender, []
                 remux = subprocess.Popen(
-                    [
-                        "ffmpeg",
-                        "-nostdin",
-                        "-hide_banner",
-                        "-loglevel",
-                        "fatal",
-                        "-y",
-                        "-i",
-                        str(raw_transport_fifo),
-                        "-map",
-                        "0:v:0",
-                        "-map",
-                        "0:a:0",
-                        "-c",
-                        "copy",
-                        "-mpegts_start_pid",
-                        "256",
-                        "-mpegts_pmt_start_pid",
-                        "4096",
-                        "-muxdelay",
-                        "0.7",
-                        "-muxpreload",
-                        "0.7",
-                        "-f",
-                        "mpegts",
-                        str(transport_fifo),
-                    ],
+                    live_remux_command(str(raw_transport_fifo), str(transport_fifo), p2p=is_p2p),
                 )
                 return sender, [remux]
 
             attempt = max(1, int(os.environ.get("HOVENCAST_ATTEMPT", "1") or 1))
-            with event_path.open("w" if attempt == 1 else "a", encoding="utf-8") as event_file:
+            with event_path.open("w" if attempt == 1 and not is_p2p else "a", encoding="utf-8") as event_file:
                 emit(
                     event_file,
                     "live-cast-requested",
                     attempt=attempt,
                     receiver=args.address,
                     duration_seconds=args.duration,
-                    video_profile="high",
+                    video_profile="baseline" if (is_p2p or is_cast) else "high",
                     video_mode=video_mode.name,
                     video_width=video_mode.width,
                     video_height=video_mode.height,
@@ -1728,12 +1925,15 @@ def run_cast_live(args: argparse.Namespace) -> int:
                     raw_transport_fifo,
                     args.duration,
                     event_file,
-                    False,
-                    video_profile="high",
+                    bool(getattr(args, "test_tone", False)),
+                    video_profile="baseline" if (is_p2p or is_cast) else "high",
                     video_mode=video_mode,
                     sender_start=start_sender,
+                    sender_early=is_p2p,
+                    p2p_pipeline=is_p2p,
                     mute_local_audio=not args.keep_local_audio,
                 )
+                recorder.cast_transport = is_cast
                 return recorder.start()
     finally:
         if picker_target_request:
@@ -1758,6 +1958,7 @@ SESSION_FAILURE_EVENTS = {
     "portal-closed",
     "sender-exited",
     "startup-stalled",
+    "cast-transport-failed",
 }
 
 SESSION_RETRYABLE_EVENTS = {
@@ -1820,6 +2021,19 @@ def cast_session_snapshot() -> dict[str, Any]:
         0,
     )
     records = records[latest_attempt:]
+    if str(state.get("address", "")).startswith(("cast:", "airplay:")):
+        try:
+            extra = cast_session_path("cast-transport.events.jsonl").read_text().splitlines()
+            for line in extra[-256:]:
+                try:
+                    item = json.loads(line)
+                    if isinstance(item, dict) and float(item.get("time", 0)) >= started_at:
+                        records.append(item)
+                except (ValueError, TypeError):
+                    continue
+            records.sort(key=lambda x: float(x.get("time", 0)))
+        except OSError:
+            pass
     metrics = next(
         (record for record in reversed(records) if record.get("event") == "metrics"),
         {},
@@ -1832,6 +2046,9 @@ def cast_session_snapshot() -> dict[str, Any]:
         ),
         {},
     )
+    if str(state.get("address", "")).startswith(("cast:", "airplay:")):
+        failure = next((record for record in reversed(records)
+                        if record.get("event") == "cast-transport-failed"), failure)
     events = {str(record.get("event", "")) for record in records}
     retrying = "connection-recovery-started" in events
     if retrying:
@@ -1840,13 +2057,18 @@ def cast_session_snapshot() -> dict[str, Any]:
     if running:
         if retrying:
             phase = "connecting"
+        elif str(state.get("address", "")).startswith(("cast:", "airplay:")):
+            phase = "streaming" if "cast-playing" in events else "connecting"
+        elif any(record.get("event") == "receiver-state" for record in records):
+            receiver = next(record for record in reversed(records) if record.get("event") == "receiver-state")
+            phase = "streaming" if receiver.get("detail") == "streaming" else "connecting"
         elif int(metrics.get("video_frames", 0) or 0) > 0 or "first-video" in events:
             phase = "streaming"
         elif "portal-requested" in events and "portal-started" not in events:
             phase = "awaiting-portal"
         else:
             phase = "connecting"
-    elif state.get("stop_requested"):
+    elif state.get("stop_requested") or "cast-receiver-stopped" in events:
         phase = "idle"
     elif failure:
         phase = "error"
@@ -1900,6 +2122,8 @@ def cast_live_command(args: argparse.Namespace) -> list[str]:
                 command.extend(["--source-window-title", args.source_window_title])
         elif args.source_kind == "region":
             command.extend(["--source-region", args.source_region])
+    if getattr(args, "test_tone", False):
+        command.append("--test-tone")
     if args.keep_local_audio:
         command.append("--keep-local-audio")
     if args.ipc_target:
@@ -1968,6 +2192,8 @@ def run_session_runner(args: argparse.Namespace) -> int:
         result = subprocess.run(cast_live_command(args), env=environment, check=False)
         if result.returncode in {0, 130}:
             return result.returncode
+        if args.address.startswith(("cast:", "airplay:")):
+            return result.returncode
         failure = _last_session_failure()
         if attempt >= SESSION_MAX_ATTEMPTS or failure not in SESSION_RETRYABLE_EVENTS:
             return result.returncode
@@ -1976,14 +2202,88 @@ def run_session_runner(args: argparse.Namespace) -> int:
     return 1
 
 
+def session_history_root() -> pathlib.Path:
+    base = pathlib.Path(os.environ.get("XDG_STATE_HOME") or pathlib.Path.home() / ".local/state")
+    return base / "hovencast/session-history"
+
+
+def archive_session_logs() -> pathlib.Path | None:
+    """Preserve the stopped session before reuse of the live filenames."""
+    names = ("cast-session.log", "session.events.jsonl", "cast-session.json")
+    sources = [(name, cast_session_path(name)) for name in names]
+    if not any(path.is_file() and not path.is_symlink() for _, path in sources):
+        return None
+    root = session_history_root()
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    root.chmod(0o700)
+    archive = pathlib.Path(tempfile.mkdtemp(prefix="session-", dir=root))
+    for name, source in sources:
+        if source.is_file() and not source.is_symlink():
+            destination = archive / name
+            shutil.copyfile(source, destination)
+            destination.chmod(0o600)
+    # Only prune our exact, known log files. Leave unexpected directories or
+    # contents alone instead of recursively deleting anything under state.
+    histories = sorted((path for path in root.glob("session-*")
+                        if path.is_dir() and not path.is_symlink()),
+                       key=lambda path: path.stat().st_mtime_ns, reverse=True)
+    for old in histories[10:]:
+        children = list(old.iterdir())
+        if all(child.name in names and not child.is_dir() for child in children):
+            for child in children:
+                child.unlink()
+            old.rmdir()
+    return archive
+
+
+def consume_video_trace_request() -> None:
+    """Consume only after capture starts, so pairing failures retain the trace."""
+    request = cast_session_path("video-trace.request")
+    try:
+        if request.is_file() and not request.is_symlink() and request.read_text(encoding="utf-8").strip() == "1":
+            request.unlink()
+    except OSError:
+        # Optional diagnostics must not interrupt display capture.
+        pass
+
+
+def run_session_trace(_args: argparse.Namespace) -> int:
+    with cast_session_lock():
+        state = read_cast_session_state()
+        path = cast_session_path("video-trace.control.json")
+        if not state or not session_process_is_running(state) or not path.is_file() or path.is_symlink():
+            raise RuntimeError("Live tracing is unavailable; reconnect once to load the new tracer")
+        control = json.loads(path.read_text(encoding="utf-8"))
+        pid = int(control.get("recorder_pid", 0))
+        if (pid <= 1 or control.get("session_pid") != state["pid"] or
+                control.get("session_start_ticks") != state["start_ticks"] or
+                control.get("recorder_start_ticks") is None or
+                process_start_ticks(pid) != control["recorder_start_ticks"]):
+            raise RuntimeError("Live trace control belongs to a different or stopped session")
+        os.kill(pid, signal.SIGUSR1)
+    print(json.dumps({"trace_requested": True, "seconds": 90}))
+    return 0
+
+
 def run_session_start(args: argparse.Namespace) -> int:
+    if args.address.startswith("airplay:"):
+        import asyncio
+        from airplay_transport import require_paired
+        asyncio.run(require_paired(args.address))
     with cast_session_lock():
         existing = read_cast_session_state()
         if existing and session_process_is_running(existing):
             raise RuntimeError("A HovenCast session is already running")
+        archive_session_logs()
         cast_session_path("session.events.jsonl").unlink(missing_ok=True)
+        cast_session_path("cast-transport.events.jsonl").unlink(missing_ok=True)
         log_path = cast_session_path("cast-session.log")
         started_at = time.time()
+        environment = dict(os.environ)
+        trace_request = cast_session_path("video-trace.request")
+        if trace_request.is_file() and not trace_request.is_symlink():
+            if trace_request.read_text(encoding="utf-8").strip() == "1":
+                environment["HOVENCAST_VIDEO_TRACE"] = "1"
         with log_path.open("w", encoding="utf-8") as log_file:
             log_path.chmod(0o600)
             process = subprocess.Popen(
@@ -1993,6 +2293,7 @@ def run_session_start(args: argparse.Namespace) -> int:
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
                 close_fds=True,
+                env=environment,
             )
         start_ticks = process_start_ticks(process.pid)
         if start_ticks is None:
@@ -2021,6 +2322,26 @@ def run_session_status(_args: argparse.Namespace) -> int:
     return 0
 
 
+def session_stop_grace(state: dict[str, Any]) -> float:
+    # P2P releases a privileged firewall lease and then waits for asynchronous
+    # link teardown. Do not SIGKILL it halfway through that bounded cleanup.
+    address = str(state.get("address", ""))
+    return 45.0 if address.startswith("p2p:") else (10.0 if address.startswith(("cast:", "airplay:")) else 5.0)
+
+
+def live_process_group(pgid: int) -> bool:
+    for entry in pathlib.Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+            if fields[0] != "Z" and int(fields[2]) == pgid:
+                return True
+        except (OSError, ValueError, IndexError):
+            continue
+    return False
+
+
 def run_session_stop(_args: argparse.Namespace) -> int:
     with cast_session_lock():
         state = read_cast_session_state()
@@ -2035,10 +2356,13 @@ def run_session_stop(_args: argparse.Namespace) -> int:
                 os.killpg(pid, signal.SIGTERM)
             except ProcessLookupError:
                 pass
-            deadline = time.monotonic() + 5
-            while session_process_is_running(state) and time.monotonic() < deadline:
+            deadline = time.monotonic() + session_stop_grace(state)
+            def still_running():
+                return (live_process_group(pid) if str(state.get("address", "")).startswith(("cast:", "airplay:"))
+                        else session_process_is_running(state))
+            while still_running() and time.monotonic() < deadline:
                 time.sleep(0.1)
-            if session_process_is_running(state):
+            if still_running():
                 try:
                     os.killpg(pid, signal.SIGKILL)
                 except ProcessLookupError:
@@ -2164,15 +2488,42 @@ def add_cast_arguments(parser: argparse.ArgumentParser, *, detached: bool = Fals
         help="also play desktop audio on the computer while casting",
     )
     parser.add_argument("--ipc-target", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--test-tone", action="store_true", help=argparse.SUPPRESS)
     if detached:
         parser.add_argument("--receiver-name", default="", help=argparse.SUPPRESS)
 
 
+def run_airplay_pairing(args):
+    import asyncio
+    from airplay_transport import pair_receiver, submit_pin
+    try:
+        if args.command == "airplay-pin":
+            submit_pin(args.address, args.pin)
+            return 0
+        async def pairing_task():
+            task = asyncio.current_task()
+            asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, task.cancel)
+            return await pair_receiver(args.address)
+        try:
+            return asyncio.run(pairing_task())
+        except asyncio.CancelledError:
+            return 130
+    except Exception as error:
+        print(f"Apple TV pairing failed: {error}", file=sys.stderr)
+        return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Cast an Omarchy desktop to a supported Roku TV")
-    parser.add_argument("--version", action="version", version=f"HovenCast {APP_VERSION}")
+    parser = argparse.ArgumentParser(description="Cast an Omarchy desktop to a wireless display")
+    parser.add_argument("--version", action="version", version=f"{APP_NAME} {APP_VERSION}")
     subparsers = parser.add_subparsers(dest="command", required=True)
-    discover = subparsers.add_parser("discover", help="discover Miracast-over-LAN receivers")
+    for operation in ("airplay-pair", "airplay-pin"):
+        pairing = subparsers.add_parser(operation, help="pair an Apple TV")
+        pairing.add_argument("--address", required=True)
+        if operation == "airplay-pin":
+            pairing.add_argument("--pin", required=True)
+        pairing.set_defaults(func=run_airplay_pairing)
+    discover = subparsers.add_parser("discover", help="discover LAN and Wi-Fi Direct Miracast receivers")
     discover.set_defaults(func=run_discover)
     source_list = subparsers.add_parser("source-list", help=argparse.SUPPRESS)
     source_list.set_defaults(func=run_source_list)
@@ -2197,6 +2548,8 @@ def build_parser() -> argparse.ArgumentParser:
         "session-stop", help="stop the detached wireless display session"
     )
     session_stop.set_defaults(func=run_session_stop)
+    session_trace = subparsers.add_parser("session-trace", help="start a bounded video trace without reconnecting")
+    session_trace.set_defaults(func=run_session_trace)
     workspace_list = subparsers.add_parser(
         "workspace-list", help="list Hyprland workspaces"
     )

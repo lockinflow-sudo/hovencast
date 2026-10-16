@@ -1,0 +1,17 @@
+#!/usr/bin/bash
+set -euo pipefail
+root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+[[ $# -eq 0 ]] || exit 2
+if [[ $EUID -ne 0 ]]; then
+  exec /usr/bin/pkexec /usr/bin/bash "$root/scripts/remove-p2p-helper"
+fi
+# Revoke the grant first. Never remove arbitrary user-provided paths.
+/usr/bin/rm -f -- /etc/polkit-1/rules.d/49-hovencast-p2p.rules \
+  /usr/share/polkit-1/actions/org.hovencast.p2p.policy \
+  /usr/local/libexec/hovencast-p2p-helper /usr/local/libexec/hovencast-p2p-helper.py
+/usr/bin/rm -f -- /etc/polkit-1/rules.d/49-hovencast-metadata.rules \
+  /usr/share/polkit-1/actions/org.hovencast.metadata.policy \
+  /usr/local/libexec/hovencast-metadata-reader /usr/local/libexec/hovencast-metadata-reader.py
+if ! /usr/bin/python -I "$root/scripts/wifi_compat.py" remove; then
+  echo "The Wi-Fi compatibility file was preserved; review it manually before restarting NetworkManager." >&2
+fi

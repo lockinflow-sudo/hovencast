@@ -78,6 +78,38 @@ class PortalConfigTest(unittest.TestCase):
         self.assertEqual(state["version"], 1)
         self.assertTrue((self.state_home / "hovencast/xdph.conf.before-hovencast").exists())
 
+    def test_failed_state_save_does_not_change_picker(self) -> None:
+        target = self.config_home / "hypr/xdph.conf"
+        target.parent.mkdir(parents=True)
+        original = "screencopy {\n    custom_picker_binary = /opt/old-picker\n}\n"
+        target.write_text(original)
+        write = portal_config.atomic_write
+        def fail_state(path, text, mode=0o644):
+            if path.name == "portal.json":
+                raise OSError("state write failed")
+            write(path, text, mode)
+        with mock.patch.object(portal_config, "atomic_write", side_effect=fail_state):
+            with self.assertRaises(OSError):
+                portal_config.install(self.picker)
+        self.assertEqual(target.read_text(), original)
+
+    def test_interrupted_config_write_can_be_retried(self) -> None:
+        target = self.config_home / "hypr/xdph.conf"
+        target.parent.mkdir(parents=True)
+        original = "screencopy {\n    custom_picker_binary = /opt/old-picker\n}\n"
+        target.write_text(original)
+        write = portal_config.atomic_write
+        def fail_config(path, text, mode=0o644):
+            if path == target:
+                raise OSError("config write failed")
+            write(path, text, mode)
+        with mock.patch.object(portal_config, "atomic_write", side_effect=fail_config):
+            with self.assertRaises(OSError):
+                portal_config.install(self.picker)
+        portal_config.install(self.picker)
+        portal_config.remove()
+        self.assertEqual(target.read_text(), original)
+
     def test_remove_restores_legacy_allow_token_state(self) -> None:
         target = self.config_home / "hypr/xdph.conf"
         target.parent.mkdir(parents=True)
