@@ -1,6 +1,6 @@
 function setupLaunchCommand(setupPath) {
   return ["omarchy", "launch", "terminal", "-e", "bash", "-c",
-    '"$1"; result=$?; printf "\\nPress Enter to close…"; read -r; exit "$result"',
+    '"$1"; result=$?; printf "\\nPress Enter to close…"; read -r </dev/tty 2>/dev/null || true; exit "$result"',
     "hovencast-setup", String(setupPath)]
 }
 

@@ -71,7 +71,16 @@ def readiness(*, require_complete: bool = True) -> dict:
             expected = json.loads(provenance.read_text())["binary_sha256"]
             installed = data / helper_path
             if not installed.is_file() or hashlib.sha256(installed.read_bytes()).hexdigest() != expected:
-                issues.append("Install or update bundled receiver helper: " + installed.name)
+                label = "Google Cast" if installed.name == "cast_sender" else "Apple TV"
+                issues.append("Install or update " + label + " streaming support")
+    outcome = portal_config.state_dir() / "last-setup.json"
+    if issues and outcome.is_file():
+        try:
+            previous = json.loads(outcome.read_text())
+            if previous.get("status") == "failed":
+                issues.append("Last setup failed: " + str(previous.get("message", "Unknown error"))[:300])
+        except (OSError, ValueError, TypeError):
+            pass
     return {"ready": not issues, "issues": issues, "missing_packages": missing}
 
 
@@ -244,9 +253,17 @@ def main() -> int:
         except BlockingIOError:
             print("HovenCast setup or removal is already running.", file=sys.stderr)
             return 1
+        def record_result(status, message):
+            portal_config.atomic_write(state_root / "last-setup.json",
+                json.dumps({"status": status, "message": message, "action": "uninstall" if args.uninstall else "setup"}) + "\n", 0o600)
         try:
-            return uninstall() if args.uninstall else install(args.wifi_compat_adapter)
+            result = uninstall() if args.uninstall else install(args.wifi_compat_adapter)
+            complete = args.uninstall or readiness()["ready"]
+            record_result("success" if complete else "incomplete",
+                          "Finished" if complete else "Setup was cancelled or did not finish.")
+            return result
         except (Exception, KeyboardInterrupt) as error:
+            record_result("failed", str(error))
             print(f"HovenCast setup did not finish: {error}", file=sys.stderr)
             return 1
 

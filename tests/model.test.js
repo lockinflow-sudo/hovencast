@@ -116,7 +116,6 @@ assert.equal(
   '<img src="https://example.invalid/window-title-probe">'
 )
 
-const panelSource = fs.readFileSync(path.join(__dirname, "..", "Panel.qml"), "utf8")
 assert.match(qmlObjectBlock(panelSource, "Text", "applicationNameLabel"), /textFormat:\s*Text\.PlainText/)
 assert.match(qmlObjectBlock(panelSource, "Text", "windowDescription"), /textFormat:\s*Text\.PlainText/)
 assert.match(qmlObjectBlock(panelSource, "Text", "receiverNameLabel"), /textFormat:\s*Text\.PlainText/)

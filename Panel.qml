@@ -127,12 +127,15 @@ Panel {
 
   function launchReceiverSetup(script) {
     if (sessionActive || setupLaunchProc.running) return
+    root.close()
     setupLaunchProc.command = Model.setupLaunchCommand(Model.localPath(Qt.resolvedUrl(script)))
     setupLaunchProc.running = true
   }
 
   function launchSetup() {
     if (!setupChecked || setupLaunchProc.running || sessionActive) return
+    // Release the popup keyboard grab before opening an interactive terminal.
+    root.close()
     // Pass the local path as an argument, never interpolate it into shell code.
     setupLaunchProc.command = Model.setupLaunchCommand(setupCommand)
     setupLaunchProc.running = true
@@ -558,6 +561,8 @@ Panel {
     return JSON.stringify({
       buildTitle: root.buildTitle,
       version: root.version,
+      setupReady: root.setupReady,
+      setupIssue: root.setupIssue,
       deviceCount: root.receivers.length,
       groupedDeviceCount: root.receivers.filter(function(row) { return (row.endpoints || []).length > 1 }).length,
       state: sessionState,

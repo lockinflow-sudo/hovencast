@@ -242,3 +242,17 @@ class SetupTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SetupOutcomeTest(unittest.TestCase):
+    setUp = SetupTest.setUp
+    tearDown = SetupTest.tearDown
+    def test_failed_setup_is_preserved_for_the_panel(self):
+        with mock.patch.object(sys, 'argv', ['hovencast-setup']), \
+             mock.patch.object(setup, 'install', side_effect=RuntimeError('helper approval cancelled')), \
+             contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(setup.main(), 1)
+        outcome = portal.state_dir() / 'last-setup.json'
+        self.assertEqual(json.loads(outcome.read_text())['status'], 'failed')
+        self.assertEqual(outcome.stat().st_mode & 0o777, 0o600)
+        self.assertIn('Last setup failed: helper approval cancelled', setup.readiness()['issues'])

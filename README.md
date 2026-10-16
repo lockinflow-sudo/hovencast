@@ -47,6 +47,9 @@ omarchy plugin add https://github.com/lockinflow-sudo/hovencast.git --enable
 5. Choose a workspace and TV. Approve any receiver prompt. Your laptop keeps
    its own workspace while the selected workspace appears on the TV.
 
+After updating an existing installation, stop casting and run `omarchy restart shell`
+once so the running bar loads the new panel and version.
+
 The install command adds the widget; it does not silently install packages or
 change screen-sharing configuration. You can decline setup and return later.
 Setup checks are read-only. A manual terminal entry point is also available:
@@ -101,7 +104,7 @@ unchanged HovenCast-owned compatibility file.
 ## Use and stop
 
 **Extend Display** places a workspace on a dedicated wireless display. Choose
-left or right placement relative to your laptop. The panel can switch the TV's
+left, right, above, or below placement relative to your laptop. The panel can switch the TV's
 workspace during a session. Moving an application between laptop and TV
 workspaces also follows its audio where the application exposes a distinct
 playback stream; one browser process spanning both displays can share audio.

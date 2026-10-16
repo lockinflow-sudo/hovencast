@@ -5,7 +5,7 @@ setup and optional Google Cast / Apple TV setup from the panel.
 
 ## Passed on October 15, 2026
 
-- All 261 Python regression tests passed, including eight isolated first-run flow scenarios.
+- All 263 Python regression tests passed, including eight isolated first-run flow scenarios.
 - JavaScript model tests passed; the plugin manifest validates; QML lint passes.
 - The Miracast helper builds from the included source.
 - Bundled Google Cast and AirPlay binaries match their recorded SHA-256 values.
@@ -42,3 +42,23 @@ laptop. This does not establish a clean machine's installation behavior.
 
 No clean-machine acceptance, GitHub publication, or marketplace deployment has
 been claimed. The working installed plugin was not replaced during preparation.
+
+## Same-laptop acceptance — October 16, 2026 (in progress)
+
+The user selected a backed-up fresh plugin installation on the existing laptop.
+The plugin, user data, state, shell/portal configuration, helper/polkit files,
+adapter compatibility setting and UFW rules were backed up before changes.
+Old cleanup removed eight owned firewall rules, the scoped helpers, and the
+owned picker setting. The original plugin/data/state directories were parked
+outside the active plugin directory.
+
+The candidate was cloned through the real `omarchy plugin add ... --enable`
+path from its local release checkout. The initial running shell retained the old
+panel until a shell restart; after restart, IPC and the visible first-use panel
+both reported HovenCast 2.5.0. The visible setup entry and missing-support checks
+were verified. Real panel-to-terminal setup and hardware testing are pending.
+
+All required Arch packages already exist on this laptop. This test therefore
+cannot establish installation of missing Arch packages on a package-clean host.
+Optional receiver Python environments and bundled helpers start from empty
+user-data storage for this acceptance run.
