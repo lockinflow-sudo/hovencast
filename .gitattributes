@@ -1,0 +1,3 @@
+# Preserve the exact upstream notices and reproducible patch, including context lines.
+native/chromecast/source.patch -whitespace
+native/chromecast/licenses/* -whitespace
