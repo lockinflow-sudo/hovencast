@@ -1,0 +1,52 @@
+name: Report a problem or get setup help
+description: Tell us where you got stuck with installation, setup, casting or removal.
+title: "[Help]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A short description is enough to start. This report is public. Do not include pairing PINs, credentials, personal screen content, or private network details.
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Where did it happen?
+      options:
+        - Installing the widget
+        - First-use setup
+        - Finding or pairing a receiver
+        - Connecting or casting
+        - Stopping or reconnecting
+        - Removing HovenCast
+        - Other / unsure
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened, and what did you expect?
+      description: Describe the steps you tried and copy the exact error if one appeared.
+    validations:
+      required: true
+  - type: input
+    id: receiver
+    attributes:
+      label: Receiver type and model (optional)
+      placeholder: Roku TV, Fire TV Stick, Google Cast, Apple TV, other, or no receiver yet
+  - type: input
+    id: version
+    attributes:
+      label: HovenCast and Omarchy versions (optional)
+      description: HovenCast shows its version in the panel. Run `omarchy version` for the desktop version.
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Relevant log lines (optional)
+      description: Setup output is saved in ~/.local/state/hovencast/last-setup-terminal.log unless XDG_STATE_HOME is customized. Paste only relevant, redacted lines.
+      render: shell
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Public report
+      options:
+        - label: I removed private information, pairing secrets, and sensitive screen content.
+          required: true

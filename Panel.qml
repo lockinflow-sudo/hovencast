@@ -1679,7 +1679,7 @@ Panel {
             }
             Text {
               width: parent.width
-              text: "Roku, Fire TV, Google Cast, and paired Apple TV support. Additional receiver setup is available after core setup."
+              text: "Roku, Fire TV and Google Cast support. Apple TV / AirPlay is experimental and needs further hardware testing. Additional receiver setup is available after core setup."
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
@@ -2435,7 +2435,7 @@ Panel {
 
                   Text {
                     Layout.fillWidth: true
-                    text: receiverRow.modelData.protocol === "airplay" && !receiverRow.modelData.paired ? "PAIR APPLE TV" : receiverRow.modelData.protocol === "airplay" ? "AIRPLAY · BETA" : Model.connectionSummary(receiverRow.modelData)
+                    text: receiverRow.modelData.protocol === "airplay" && !receiverRow.modelData.paired ? "PAIR APPLE TV" : receiverRow.modelData.protocol === "airplay" ? "AIRPLAY · EXPERIMENTAL" : Model.connectionSummary(receiverRow.modelData)
                     textFormat: Text.PlainText
                     color: root.foreground
                     font.family: root.fontFamily
@@ -2498,7 +2498,7 @@ Panel {
           }
           Repeater {
             model: [ { label: "Set up Google Cast", script: "hovencast-chromecast-setup" },
-                     { label: "Set up Apple TV", script: "hovencast-airplay-setup" } ]
+                     { label: "Set up Apple TV (experimental)", script: "hovencast-airplay-setup" } ]
             delegate: CastSurface {
               required property var modelData
               width: parent.width

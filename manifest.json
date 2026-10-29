@@ -5,7 +5,7 @@
   "version": "2.5.0",
   "author": "Sean Hovenkamp",
   "license": "MIT",
-  "description": "Turn your TV into a wireless second Omarchy monitor, with independent workspaces and audio. Supports compatible Roku, Fire TV, Google Cast, and paired Apple TV receivers.",
+  "description": "Turn a compatible TV into a wireless second monitor for Omarchy. Keep a workspace on your TV or share a screen, window or area with audio. Roku, Fire TV and Google Cast; Apple TV / AirPlay is experimental.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "HovenCast",
-    "description": "Turn your TV into a wireless second Omarchy monitor, with independent workspaces and audio. Supports compatible Roku, Fire TV, Google Cast, and paired Apple TV receivers.",
+    "description": "Turn a compatible TV into a wireless second monitor for Omarchy. Keep a workspace on your TV or share a screen, window or area with audio. Roku, Fire TV and Google Cast; Apple TV / AirPlay is experimental.",
     "category": "Network",
     "allowMultiple": false,
     "defaultSection": "right",

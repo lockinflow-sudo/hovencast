@@ -1,64 +1,85 @@
 # HovenCast 2.5.0 release validation
 
-The release candidate combines the hardware-tuned backends with guided core
-setup and optional Google Cast / Apple TV setup from the panel.
+Validation completed October 29, 2026. The release combines Roku, Fire TV,
+Google Cast and experimental Apple TV paths with guided first-use setup.
 
-## Passed on October 15, 2026
+## Automated and packaging checks
 
-- All 263 Python regression tests passed, including eight isolated first-run flow scenarios.
-- JavaScript model tests passed; the plugin manifest validates; QML lint passes.
-- The Miracast helper builds from the included source.
-- Bundled Google Cast and AirPlay binaries match their recorded SHA-256 values.
-- The Google Cast installer rejects a checksum mismatch or missing ABI before
-  replacing the prior working helper; corresponding rebuild inputs and notices are included.
+- 265 Python regression tests passed, including eight isolated first-run scenarios.
+- JavaScript model tests, Omarchy manifest validation, shell syntax and whitespace
+  checks passed. QML lint exited successfully with framework warnings.
+- The Miracast helper builds from the included C source.
+- Bundled Google Cast and AirPlay binaries match the SHA-256 values recorded in
+  their provenance files. Source/rebuild inputs and license notices are included.
+- Google Cast installation rejects a checksum mismatch or missing shared-library
+  ABI before replacing the previous helper.
 
-The first-run harness mounts the host read-only in bubblewrap, uses a temporary
-home, and isolates networking, processes, runtime and D-Bus. It runs the real
-Omarchy add/enable/remove and terminal command routes, local Git clone, setup
-entry points, media checks, native compilation and portal configuration code.
-Package installation, privileged helper installation/removal, terminal creation,
-shell IPC and portal services are simulated. These scenarios cover installation
-trust/placement, declining installation, fresh setup, cancellation/retry,
-package failure, compilation failure, portal rollback, idempotency, removal,
-and recovery after the plugin directory is deleted.
+The first-run harness uses bubblewrap with a private home and isolated network,
+process, runtime and D-Bus namespaces. It exercises the real Omarchy add, enable,
+remove and terminal command routes, local Git clone, setup entry points, native
+compilation and portal configuration. Package installation, privileged helper
+operations, shell IPC and desktop services are simulated. Cases include trust
+confirmation, placement, declining installation, setup cancellation/retry,
+package failure, compilation failure, service failure/portal rollback,
+idempotency, cleanup and recovery after the plugin directory is deleted.
 
-The source backend hardware validation predates this unified release candidate:
-Fire Stick cursor/audio, native Apple TV cursor/audio, and Google Cast normal
-video, picture, cursor and audio were confirmed on the configured development
-laptop. This does not establish a clean machine's installation behavior.
+The test package stub handles the option separator used by current Omarchy's
+`pacman -Q -- PACKAGE` verification command.
 
-## Final acceptance still required
+## Real same-laptop acceptance
 
-1. Install the candidate in the selected real Omarchy environment.
-2. Check the visible first-use panel and real terminal confirmation.
-3. Verify actual dependency installation, scoped helper approval, native helper
-   installation and portal restart. Record whether packages were already present.
-4. Verify Roku, Fire TV, Google Cast and Apple TV paths on available hardware,
-   including normal video/audio, cursor movement and Stop/reconnect.
-5. Verify uninstall restores screen sharing and removes owned helper/firewall
-   integration; preserve and restore the previous working installation.
-6. Publish the tested commit and v2.5.0 release, then request exact-commit marketplace
-   review and removal of the existing manual-installation override.
+The working plugin, user data, state, configuration and system integration were
+backed up privately before a fresh plugin installation on the development laptop.
+Actual panel-launched core setup passed with exit status 0 and setupReady=true.
+The detached setup terminal survived a deliberate plugin reload.
 
-No clean-machine acceptance, GitHub publication, or marketplace deployment has
-been claimed. The working installed plugin was not replaced during preparation.
+Fresh Google Cast optional setup installed its pinned dependencies, verified
+the native helper, discovered CarbonCast and created receiver-scoped UFW rules.
+The owner manually reconfirmed that Google Cast and Fire Stick still work on
+October 29. That confirmation did not separately enumerate every picture,
+audio, cursor and Stop/reconnect case; those cases are not all claimed as newly
+verified. Prior detailed transport measurements remain in the receiver notes.
 
-## Same-laptop acceptance — October 16, 2026 (in progress)
+Actual cleanup and restoration passed on October 29. Uninstall restored the
+prior portal configuration, removed tracked receiver firewall rules while
+preserving unrelated rules, and completed privileged helper removal. Setup
+then restored the working integration. Archived system-file contents, the
+Wi-Fi compatibility opt-in, portal configuration, receiver firewall ownership
+and shell settings matched the saved working setup. Portal services were active
+and HovenCast reported v2.5.0, setupReady=true, state=idle.
 
-The user selected a backed-up fresh plugin installation on the existing laptop.
-The plugin, user data, state, shell/portal configuration, helper/polkit files,
-adapter compatibility setting and UFW rules were backed up before changes.
-Old cleanup removed eight owned firewall rules, the scoped helpers, and the
-owned picker setting. The original plugin/data/state directories were parked
-outside the active plugin directory.
+The initial external acceptance harness omitted two protected polkit grant
+files from its archive because it checked their existence without privilege.
+A read-only privileged follow-up confirmed both restored grants match the
+installed candidate source. Their exact pre-test bytes were unavailable; this
+limitation does not establish a setup failure. The external harness was fixed.
+A widget placement preference reset by ordinary disable/enable was restored.
 
-The candidate was cloned through the real `omarchy plugin add ... --enable`
-path from its local release checkout. The initial running shell retained the old
-panel until a shell restart; after restart, IPC and the visible first-use panel
-both reported HovenCast 2.5.0. The visible setup entry and missing-support checks
-were verified. Real panel-to-terminal setup and hardware testing are pending.
+All required Arch packages were already installed on this laptop. Real
+installation of missing packages on a package-clean host remains unverified.
 
-All required Arch packages already exist on this laptop. This test therefore
-cannot establish installation of missing Arch packages on a package-clean host.
-Optional receiver Python environments and bundled helpers start from empty
-user-data storage for this acceptance run.
+## Experimental Apple TV / AirPlay
+
+Apple TV dependencies and the native helper were installed, but no Apple TV was
+available for final acceptance. Fresh setup, PIN pairing, playback, audio,
+cursor smoothness and Stop/reconnect require further hardware testing. Earlier
+development checks do not establish fresh-install acceptance of this release.
+Apple TV remains explicitly experimental; the owner deferred its hardware tests.
+
+A live video demonstration is also deferred and is not a release requirement.
+Existing screenshots are labeled as showing the earlier panel.
+
+## Marketplace checks and publication boundary
+
+The marketplace's unchanged compatibility and static baseline functions passed
+local inspection of the candidate: zero findings and a review-required outcome
+for bundled executable binaries, privilege, service management, installation
+and package management. A local inspection is not official bot evidence or an
+approval. Marketplace checks are not a security audit or guarantee.
+
+Publishing a newer approved commit preserves the existing manual-installation
+override. The separate standard-installation action's reviewed exception is
+installer-only and is ineligible for this multi-capability plugin. The
+marketplace maintainer must explicitly resolve the curated override through an
+authorized change. The live catalog and deployed Copy action determine whether
+standard installation has actually been enabled.

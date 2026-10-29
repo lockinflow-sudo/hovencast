@@ -165,7 +165,7 @@ def install(compat_adapter: str | None = None) -> int:
         print("HovenCast is ready. Select a workspace and a supported TV in the bar.")
         return 0
     print("HovenCast — your TV as a second Omarchy monitor\n")
-    print("Supports compatible Roku, Fire TV, Google Cast and paired Apple TV receivers.")
+    print("Supports compatible Roku, Fire TV and Google Cast receivers. Apple TV / AirPlay is experimental; further hardware testing is required.")
     print("Setup will:\n  1. Install missing Arch packages\n  2. Build the display helper locally")
     print("  Install scoped local-session Wi-Fi Direct and identity helpers (admin approval)")
     print("  Install the bundled Google Cast and AirPlay native helpers")

@@ -33,7 +33,7 @@ if name == 'pacman':
     if args == ['-Qq']:
         print('\n'.join(sorted(packages)))
     elif args and args[0] == '-Q':
-        sys.exit(0 if all(p in packages for p in args[1:]) else 1)
+        sys.exit(0 if all(p in packages for p in args[1:] if p != '--') else 1)
     elif args and args[0] == '-S':
         if (root/'fail-package').exists(): sys.exit(1)
         packages.update(a for a in args[1:] if not a.startswith('-'))

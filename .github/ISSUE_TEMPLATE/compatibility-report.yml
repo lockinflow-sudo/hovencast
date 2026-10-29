@@ -1,9 +1,13 @@
-name: Roku compatibility report
-description: Tell us whether HovenCast works with your Roku TV model.
+name: Share your receiver results
+description: Tell us what works—or partly works—with your TV, streaming device and Wi-Fi adapter.
 title: "[Compatibility]: "
 labels:
   - compatibility
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Successful setups are useful too. Please report one receiver per issue. Apple TV / AirPlay is experimental and needs further hardware testing.
   - type: dropdown
     id: result
     attributes:
@@ -14,53 +18,65 @@ body:
         - Does not work
     validations:
       required: true
-  - type: input
-    id: vendor
+  - type: dropdown
+    id: receiver
     attributes:
-      label: TV vendor
-      placeholder: TCL, Hisense, Roku, etc.
+      label: Receiver type
+      options:
+        - Roku TV
+        - Fire TV / Fire TV Stick
+        - Google Cast / Chromecast
+        - Apple TV / AirPlay (experimental)
+        - Other / unsure
     validations:
       required: true
   - type: input
     id: model
     attributes:
-      label: TV model
-      description: Find this under Settings → System → About.
+      label: Receiver brand and model
+      description: Include the streaming device model if it is separate from the TV. Unknown is fine if you cannot find it.
+      placeholder: TCL 32S331, Fire TV Stick model, Chromecast model, etc.
     validations:
       required: true
-  - type: input
-    id: omarchy
+  - type: textarea
+    id: behavior
     attributes:
-      label: Omarchy version
-      description: Run `omarchy version`.
+      label: What worked, and what did not?
+      description: A short report is enough. Mention connection, picture, audio, cursor response, and whether Stop/reconnect worked if you tried them.
     validations:
       required: true
   - type: checkboxes
     id: sources
     attributes:
-      label: Sources tested
+      label: What did you test? (optional)
       options:
-        - label: Full screen
-        - label: Window
-        - label: Region
-        - label: Desktop audio
-  - type: textarea
-    id: behavior
+        - label: Separate TV workspace (Extend Display)
+        - label: Full-screen sharing
+        - label: Window sharing
+        - label: Area sharing
+        - label: Audio
+        - label: Stop and reconnect
+  - type: input
+    id: version
     attributes:
-      label: What happened?
-      description: Describe connection, video, audio, delay, and how the session ended.
-    validations:
-      required: true
+      label: HovenCast and Omarchy versions (optional)
+      description: HovenCast shows its version in the panel. Run `omarchy version` for the desktop version.
+      placeholder: HovenCast 2.5.0; Omarchy version
+  - type: input
+    id: connection
+    attributes:
+      label: Connection and Wi-Fi adapter (optional)
+      description: Same LAN or Wi-Fi Direct; adapter model if known. Do not include network addresses.
   - type: textarea
     id: diagnostics
     attributes:
-      label: Optional diagnostics
-      description: Paste relevant log lines only. Redact IP addresses, usernames, paths, and private screen content.
+      label: Relevant log lines (optional)
+      description: Include only the lines needed to understand the result. Remove PINs, credentials, addresses, usernames, and personal content.
       render: shell
   - type: checkboxes
     id: privacy
     attributes:
-      label: Privacy check
+      label: Public report
       options:
-        - label: I removed private information and sensitive screen content from this report.
+        - label: I removed private information, pairing secrets, and sensitive screen content.
           required: true

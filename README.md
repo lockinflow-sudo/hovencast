@@ -1,67 +1,97 @@
-# HovenCast 2.5
+# HovenCast
 
-**Your TV. A second Omarchy monitor.**
+**Turn your TV into a wireless second monitor for Omarchy.**
 
-Move a workspace onto your TV while your laptop stays independently usable.
-You can also share a screen, application window, or selected area with audio.
-HovenCast runs as an Omarchy bar widget and streams directly over your local
-network or a dedicated Wi-Fi Direct link.
+Give your TV its own workspace while you keep working on your laptop.
+Or share a screen, a window, or a selected area with audio.
 
-## Receiver compatibility
+**Tested with compatible Roku TVs, Fire TV Stick, and Google Cast.**
+Apple TV / AirPlay is **experimental and needs further hardware testing**.
 
-| Receiver | Connection | Validation |
-| --- | --- | --- |
-| TCL Roku 32S331, 55S405, 65S451 | Miracast over Infrastructure, same LAN | Hardware tested |
-| Fire TV Stick | Miracast over Wi-Fi Direct; keep Display Mirroring open | Hardware tested, cursor and audio tuned |
-| Google Chromecast | Native Google Cast mirroring, same LAN | Hardware tested on CarbonCast; smooth cursor, picture and audio confirmed |
-| Paired Apple TV | Encrypted native AirPlay mirroring, same LAN | Hardware tested; model-specific audio compatibility included |
-| Other Roku, Miracast, Cast, or AirPlay receivers | Depends on receiver and Wi-Fi adapter | Compatibility candidates; not universally verified |
+[Try HovenCast](#try-hovencast) · [Check your receiver](#receiver-support) · [Report a problem](https://github.com/lockinflow-sudo/hovencast/issues/new?template=bug-report.yml) · [Share a working setup](https://github.com/lockinflow-sudo/hovencast/issues/new?template=compatibility-report.yml)
 
-The tuned Google Cast default is 720p30 with a 6 Mbps maximum media bitrate.
-Its 400 ms receiver playback target is not total cursor latency. A camera test
-measured about 0.56 seconds using the same timing logic at a diagnostic lower
-bitrate; final picture, playback, cursor and audio were confirmed at 6 Mbps.
-See [casting measurements](docs/google-cast-cursor-results.md) and
-[Fire Stick results](docs/firestick-cursor-results.md).
+## What can I do with it?
 
-## Install and first use
+- **Add room to work.** Keep a reference page or another application on the TV while your laptop stays on a separate workspace.
+- **Share what you choose.** Send a screen, an application window, or a selected area to the TV with audio.
+- **Control it from the Omarchy bar.** Pick a receiver, change the TV workspace, or stop casting from the panel.
 
-On a current Omarchy Quattro/Hyprland desktop:
+Streams travel directly over your local network or a Wi-Fi Direct link. No cloud relay is required.
+
+## Try HovenCast
+
+For a current **Omarchy Quattro desktop with Hyprland on x86-64**:
 
 ```sh
 omarchy plugin add https://github.com/lockinflow-sudo/hovencast.git --enable
 ```
 
-1. Open the HovenCast bar widget and choose **Review and set up**.
-2. Review and confirm the changes in the terminal. Setup installs only missing
-   Arch packages, builds the Miracast helper, installs the bundled native Cast
-   and AirPlay helpers, and requests administrative approval for scoped Wi-Fi
-   Direct and read-only receiver-metadata helpers.
-3. Setup backs up your portal configuration, changes the system-wide
-   screen-sharing picker, and restarts the user portal services. Finish other
-   screen shares first. If portal setup fails, it restores the previous settings.
-4. For Google Cast or Apple TV, use **Set up Google Cast** or **Set up Apple TV**
-   in the panel. These install pinned optional Python dependencies and create
-   receiver-specific firewall allowances when UFW is active. The receiver must
-   be available on the network. Apple TV pairing happens through the panel PIN flow.
-5. Choose a workspace and TV. Approve any receiver prompt. Your laptop keeps
-   its own workspace while the selected workspace appears on the TV.
+1. Open HovenCast in the bar and select **Review and set up**. Review the changes, enter **y** in the setup terminal, and approve administrator prompts.
+2. Prepare your receiver using the table below. For Google Cast, also select **Set up Google Cast** in the panel.
+3. Choose **Extend Display** for a separate workspace, or **Share Screen** for existing content. Select your TV and approve any prompt it shows.
 
-After updating an existing installation, stop casting and run `omarchy restart shell`
-once so the running bar loads the new panel and version.
+The command installs the widget. First-use setup is required before casting: it installs missing packages and streaming helpers, builds the Miracast helper, changes the system-wide screen-sharing picker, and restarts the user portal services. Finish other screen shares first. Setup saves recovery information, and you can decline it and return later. See [setup details](#requirements-and-setup-changes) and [removal](#remove-and-recover).
 
-The install command adds the widget; it does not silently install packages or
-change screen-sharing configuration. You can decline setup and return later.
-Setup checks are read-only. A manual terminal entry point is also available:
+After updating an existing installation, stop casting and run `omarchy restart shell` once to load the new panel.
+
+## Receiver support
+
+| Receiver | Before connecting | Status |
+| --- | --- | --- |
+| TCL Roku 32S331, 55S405, 65S451 | Same LAN; enable screen mirroring in the TV settings | Hardware tested |
+| Fire TV Stick | Open **Display Mirroring**; requires compatible Wi-Fi Direct adapter/driver | Hardware tested; owner reconfirmed working for 2.5 |
+| Google Cast / Chromecast | Same LAN; run **Set up Google Cast** from the panel | Hardware tested on CarbonCast; owner reconfirmed working for 2.5 |
+| Apple TV / AirPlay | Same LAN; **Set up Apple TV (experimental)**, then PIN pairing | **Experimental — further hardware testing required** |
+| Other receiver models | Depends on protocol, receiver and Wi-Fi adapter | Community testing welcome; compatibility is not guaranteed |
+
+Apple TV fresh setup, PIN pairing, playback, audio, cursor smoothness, and stop/reconnect need further hardware validation. Earlier development tests do not establish 2.5 fresh-install acceptance.
+
+Wireless display delay varies by receiver and network. Review the [Google Cast measurements](docs/google-cast-cursor-results.md) and [Fire Stick results](docs/firestick-cursor-results.md) if latency matters for your use. The tuned Google Cast default is 720p30 with a 6 Mbps maximum media bitrate.
+
+## Help improve HovenCast
+
+**Tried it? Tell us what happened—even if everything worked.** Reports from more receiver models and Wi-Fi adapters help identify what to improve next.
+
+- [**Share a working or partially working setup**](https://github.com/lockinflow-sudo/hovencast/issues/new?template=compatibility-report.yml): receiver model, connection type, and what you tested.
+- [**Report a problem or get setup help**](https://github.com/lockinflow-sudo/hovencast/issues/new?template=bug-report.yml): where you got stuck and what you expected.
+- [**Suggest an improvement**](https://github.com/lockinflow-sudo/hovencast/issues/new?template=feature-request.yml): what you want to do and what would make it easier.
+
+Reports are public and require a GitHub account. Share only relevant log lines. Remove PINs, pairing credentials, personal screen content, and private network details.
+
+## Panel screenshots
+
+These screenshots show the earlier 0.2.0 panel and illustrate the two casting modes; they are not screenshots of the 2.5 interface. Updated 2.5 panel screenshots are planned; a live video demonstration is deferred.
+
+| Extend Display | Share Screen |
+| --- | --- |
+| <img src="docs/screenshots/extend-display.png" alt="Earlier HovenCast panel with Extend Display selected and workspace controls" width="420"> | <img src="docs/screenshots/share-screen.png" alt="Earlier HovenCast panel with Share Screen selected" width="420"> |
+
+## Use and stop
+
+**Extend Display** places a workspace on a dedicated wireless display. Choose
+left, right, above, or below placement relative to your laptop. The panel can switch the TV's
+workspace during a session. Moving an application between laptop and TV
+workspaces also follows its audio where the application exposes a distinct
+playback stream; one browser process spanning both displays can share audio.
+
+**Share Screen** offers screen, window, and area selection. Window mode captures
+the selected monitor locally and crops the outgoing stream to the chosen window.
+Other monitor content is processed locally even though only the crop is sent.
+
+Right-click the bar icon or use the panel Stop control. HovenCast restores the
+workspace placement and prior audio route. Fire TV receivers may need Display
+Mirroring reopened before a new connection. Names alone never merge receivers;
+verified grouping keeps explicit Local network and Wi-Fi Direct choices.
+
+## Setup help
+
+If setup stops, keep the terminal open and read the error. Its output is saved privately in `${XDG_STATE_HOME:-~/.local/state}/hovencast/last-setup-terminal.log`; keyboard input is not recorded.
+
+You can reopen setup from a terminal:
 
 ```sh
 ~/.config/omarchy/plugins/hoven.cast/hovencast-setup
 ```
-
-The panel's setup terminal stays open until you press Enter. If setup fails,
-its output is saved privately in
-`${XDG_STATE_HOME:-~/.local/state}/hovencast/last-setup-terminal.log`.
-Keyboard input is not recorded.
 
 For a known Chromecast that mDNS does not find:
 
@@ -69,9 +99,9 @@ For a known Chromecast that mDNS does not find:
 ~/.config/omarchy/plugins/hoven.cast/hovencast-chromecast-setup --host DEVICE_IP
 ```
 
-The marketplace may still show **Manual setup** until its maintainers approve
-the updated listing and remove the existing installation override. GitHub
-publication alone does not change that marketplace setting.
+Core setup requires active NetworkManager and Avahi services. If your Omarchy installation still uses another network manager, [report your setup](https://github.com/lockinflow-sudo/hovencast/issues/new?template=bug-report.yml) before changing networking.
+
+The marketplace may continue to show **Manual setup** until its maintainer approves the release and explicitly resolves the installation override. The GitHub command above follows the repository's current default branch; a marketplace-reviewed snapshot does not pin that command to a particular commit.
 
 ## Requirements and setup changes
 
@@ -106,28 +136,12 @@ This disables scan MAC randomization for that adapter, including ordinary Wi-Fi
 scans. The installer explains the privacy tradeoff. Uninstall removes only an
 unchanged HovenCast-owned compatibility file.
 
-## Use and stop
-
-**Extend Display** places a workspace on a dedicated wireless display. Choose
-left, right, above, or below placement relative to your laptop. The panel can switch the TV's
-workspace during a session. Moving an application between laptop and TV
-workspaces also follows its audio where the application exposes a distinct
-playback stream; one browser process spanning both displays can share audio.
-
-**Share Screen** offers screen, window, and area selection. Window mode captures
-the selected monitor locally and crops the outgoing stream to the chosen window.
-Other monitor content is processed locally even though only the crop is sent.
-
-Right-click the bar icon or use the panel Stop control. HovenCast restores the
-workspace placement and prior audio route. Fire TV receivers may need Display
-Mirroring reopened before a new connection. Names alone never merge receivers;
-verified grouping keeps explicit Local network and Wi-Fi Direct choices.
-
 ## Remove and recover
 
 Stop casting, disable the widget, then run cleanup **before** removing the plugin:
 
 ```sh
+omarchy plugin disable hoven.cast
 ~/.config/omarchy/plugins/hoven.cast/hovencast-uninstall
 omarchy plugin remove hoven.cast
 ```
@@ -165,19 +179,6 @@ failures, rollback and removal while simulating package installation,
 privileged installation and desktop services. They do not establish a clean
 machine's hardware compatibility. The [2.5 release checklist](RELEASE_CHECKLIST.md)
 tracks the remaining acceptance gates.
-
-Report receiver model, transport, Omarchy version and the observed failure using
-[the compatibility form](https://github.com/lockinflow-sudo/hovencast/issues/new?template=compatibility-report.yml).
-Do not include pairing secrets or unredacted personal screen content.
-
-## Screenshots
-
-| Extend Display | Share Screen |
-| --- | --- |
-| <img src="docs/screenshots/extend-display.png" alt="Extend Display controls" width="420"> | <img src="docs/screenshots/share-screen.png" alt="Share Screen controls" width="420"> |
-
-The current screenshots show the earlier panel. A real laptop-and-TV demo is
-planned; no workflow illustration is included.
 
 ## License
 

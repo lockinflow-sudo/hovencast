@@ -3,11 +3,11 @@
 ## Complete locally
 
 - [x] Versioned marketplace manifest at the repository root.
-- [x] Backend source and build script included; no prebuilt helper required.
+- [x] Miracast backend source/build script and native Cast/AirPlay helper provenance, licenses and rebuild inputs included.
 - [x] No hard-coded development checkout paths.
 - [x] Portal picker setup preserves prior configuration.
 - [x] Uninstall restores only HovenCast-owned portal values.
-- [x] README documents dependencies, setup, removal, privacy, and Roku-only scope.
+- [x] README documents dependencies, guided setup, removal, privacy, receiver scope and experimental Apple TV status.
 - [x] MIT license included.
 - [x] Recordings, build products, caches, and prototype work excluded.
 
@@ -72,7 +72,12 @@
 - [x] Document optional dependencies, privileged helper scope and adapter compatibility opt-in.
 - [x] Preserve the preferred Google Cast 720p layout, 6 Mbps cap and tuned timing.
 - [x] Complete the integrated regression, source audit and isolated first-run checks.
-- [ ] Run actual first-use setup and hardware acceptance in the selected clean environment.
+- [x] Complete actual panel-launched core setup and fresh Google Cast optional setup on the backed-up existing laptop (packages already present).
+- [x] Record owner manual verification that Google Cast and Fire Stick still work (October 29, 2026).
+- [x] Record owner decision to defer Apple TV hardware acceptance until hardware is available; disclose this release limitation.
+- [x] Complete actual candidate uninstall/restoration acceptance, including the privileged authorization follow-up (October 29, 2026); detailed hardware cases not separately reported remain unclaimed.
+- [x] Owner approved publication of the reviewed 2.5 update, README and feedback forms (October 29, 2026).
 - [ ] Publish the reviewed commit and `v2.5.0` GitHub release.
-- [ ] Request marketplace validation of that exact commit and removal of the manual-install override.
+- [ ] Request newer-commit marketplace validation of that exact published HEAD and explicit maintainer review of the five detected capabilities.
+- [ ] Resolve the existing manual-install override with a marketplace maintainer: update promotion preserves it, and the separate automated standard-installation action excludes this multi-capability baseline.
 - [ ] Confirm the deployed marketplace snapshot and Copy install command.
