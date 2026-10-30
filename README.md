@@ -60,11 +60,11 @@ Reports are public and require a GitHub account. Share only relevant log lines. 
 
 ## Panel screenshots
 
-These screenshots show the earlier 0.2.0 panel and illustrate the two casting modes; they are not screenshots of the 2.5 interface. Updated 2.5 panel screenshots are planned; a live video demonstration is deferred.
+HovenCast 2.5 panels showing Roku, Fire TV Stick, and Google Cast receiver choices. Receiver lists are staged from discovered devices for readability, and live previews are hidden for privacy. These images show the controls before connecting.
 
 | Extend Display | Share Screen |
 | --- | --- |
-| <img src="docs/screenshots/extend-display.png" alt="Earlier HovenCast panel with Extend Display selected and workspace controls" width="420"> | <img src="docs/screenshots/share-screen.png" alt="Earlier HovenCast panel with Share Screen selected" width="420"> |
+| <img src="docs/screenshots/extend-display.png" alt="HovenCast 2.5 with Extend Display selected, workspace controls, and Roku, Fire TV Stick, and Google Cast receivers" width="420"> | <img src="docs/screenshots/share-screen.png" alt="HovenCast 2.5 with Share Screen selected, Desktop, Window, and Selection controls, and Google Cast highlighted" width="420"> |
 
 ## Use and stop
 
