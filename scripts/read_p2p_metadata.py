@@ -5,6 +5,8 @@ Run with isolated Python. Reads selected peer DeviceAddress/VendorExtension
 properties from a pinned supplicant bus owner; never GetAll or credentials.
 Also reads age with the fixed wpa_cli p2p_peer command. No local imports,
 credential queries, connection or configuration writes.
+The installation-check mode reports only hashes/ownership/modes for fixed
+HovenCast helper and grant paths; it accepts no caller-supplied file paths.
 The installed wrapper requires --caller PID and verifies PKEXEC_UID/PID birth.
 """
 import json
@@ -13,12 +15,52 @@ import sys
 import time
 import os
 import pathlib
+import hashlib
+import stat
 
 ROOT = "/fi/w1/wpa_supplicant1"
 SERVICE = "fi.w1.wpa_supplicant1"
 PEER = SERVICE + ".Peer"
 PROPERTIES = "org.freedesktop.DBus.Properties"
 MAC = r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}"
+
+# Fixed destinations only: callers cannot request arbitrary privileged reads.
+# Source basename, installed path, required mode.
+INSTALLATION_FILES = (
+    ("p2p_helper.py", "/usr/local/libexec/hovencast-p2p-helper.py", 0o644),
+    ("hovencast-p2p-helper", "/usr/local/libexec/hovencast-p2p-helper", 0o755),
+    ("org.hovencast.p2p.policy", "/usr/share/polkit-1/actions/org.hovencast.p2p.policy", 0o644),
+    ("49-hovencast-p2p.rules", "/etc/polkit-1/rules.d/49-hovencast-p2p.rules", 0o644),
+    ("read_p2p_metadata.py", "/usr/local/libexec/hovencast-metadata-reader.py", 0o644),
+    ("hovencast-metadata-reader", "/usr/local/libexec/hovencast-metadata-reader", 0o755),
+    ("org.hovencast.metadata.policy", "/usr/share/polkit-1/actions/org.hovencast.metadata.policy", 0o644),
+    ("49-hovencast-metadata.rules", "/etc/polkit-1/rules.d/49-hovencast-metadata.rules", 0o644),
+)
+
+
+def installed_file_record(path):
+    """Hash a bounded regular file without following a destination symlink."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 1024 * 1024:
+            raise ValueError("Invalid installed helper file")
+        contents = stream.read(1024 * 1024 + 1)
+        if len(contents) > 1024 * 1024:
+            raise ValueError("Installed helper file is too large")
+    return {"uid": info.st_uid, "gid": info.st_gid,
+            "mode": stat.S_IMODE(info.st_mode),
+            "sha256": hashlib.sha256(contents).hexdigest()}
+
+
+def installation_status():
+    files = {}
+    for name, destination, _mode in INSTALLATION_FILES:
+        try:
+            files[name] = installed_file_record(destination)
+        except (OSError, ValueError):
+            files[name] = None
+    return {"version": 1, "installation": files}
 
 
 class ReadUnavailable(Exception):
@@ -108,7 +150,7 @@ def peer_observed_at(interface, mac):
 def main(argv):
     caller = None
     if argv[:1] == ["--caller"]:
-        if len(argv) < 4 or not argv[1].isdigit() or os.geteuid() != 0:
+        if len(argv) < 3 or not argv[1].isdigit() or os.geteuid() != 0:
             raise ValueError("Invalid installed reader invocation")
         pid = int(argv[1])
         uid = int(os.environ.get("PKEXEC_UID", "0"))
@@ -116,6 +158,14 @@ def main(argv):
         if uid <= 0 or caller[1][0] != uid:
             raise ValueError("Caller does not belong to the authorizing user")
         argv = argv[2:]
+    if argv == ["--check-installation"]:
+        if caller is None:
+            raise ValueError("Installation checks require the installed reader")
+        reply = installation_status()
+        if caller_identity(caller[0]) != caller[1]:
+            raise ValueError("Caller exited or changed")
+        print(json.dumps(reply))
+        return
     if len(argv) < 2:
         raise ValueError("Usage: read_p2p_metadata.py P2P_INTERFACE PEER_MAC ...")
     validate_request(argv[0], argv[1:])

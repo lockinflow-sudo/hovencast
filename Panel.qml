@@ -1105,18 +1105,30 @@ Panel {
     bar: root.bar
     text: ""
     iconComponent: Component {
-      HovenCastSymbol {
-        anchors.fill: parent
-        iconColor: root.sessionState === "error"
-          ? root.urgent
-          : (root.connectionPending
-            ? (root.trayPulseBright
-              ? root.foreground
-              : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12))
-            : (root.sessionActive ? root.foreground : root.dim))
+      // Give the loader explicit bounds around the painted art, excluding
+      // padding in the symbol's 24-unit canvas when the bar scales the icon.
+      Item {
+        readonly property real unit: button.iconSize / 19.93
+        width: 19.93 * unit
+        height: 19.43 * unit
+        clip: true
 
-        Behavior on iconColor {
-          ColorAnimation { duration: 650; easing.type: Easing.InOutSine }
+        HovenCastSymbol {
+          width: 24 * parent.unit
+          height: 24 * parent.unit
+          x: -1.9 * parent.unit
+          y: -2.175 * parent.unit
+          iconColor: root.sessionState === "error"
+            ? root.urgent
+            : (root.connectionPending
+              ? (root.trayPulseBright
+                ? root.foreground
+                : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12))
+              : (root.sessionActive ? root.foreground : root.dim))
+
+          Behavior on iconColor {
+            ColorAnimation { duration: 650; easing.type: Easing.InOutSine }
+          }
         }
       }
     }

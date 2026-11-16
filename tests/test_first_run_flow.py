@@ -95,8 +95,18 @@ class FirstRunFlowTest(unittest.TestCase):
             shutil.copy2(source, target)
         # Privileged helper installation/removal is simulated. The actual
         # plugin clone, terminal flow, compiler and portal transaction run below.
-        for name in ('install-p2p-helper', 'device_cleanup.sh'):
-            (cls.fixture / 'scripts' / name).write_text('#!/bin/bash\nexit 0\n')
+        (cls.fixture / 'scripts/install-p2p-helper').write_text(
+            '#!/bin/bash\ntouch /tmp/test/privileged-installed\n')
+        (cls.fixture / 'scripts/device_cleanup.sh').write_text(
+            '#!/bin/bash\nrm -f /tmp/test/privileged-installed\n')
+        # Protected installation and polkit are simulated here, just like
+        # package/service state. test_privileged_setup exercises the real
+        # readiness comparison, ownership checks and repair flow separately.
+        setup_path = cls.fixture / 'scripts/setup.py'
+        setup_path.write_text(setup_path.read_text().replace(
+            'issues.extend(privileged_readiness())',
+            'issues.extend([] if Path("/tmp/test/privileged-installed").exists() '
+            'else ["Install scoped helper fixture"])'))
         subprocess.run(['git', 'init', '-q', str(cls.fixture)], check=True)
         subprocess.run(['git', '-C', str(cls.fixture), 'add', '.'], check=True)
         subprocess.run(['git', '-C', str(cls.fixture), '-c', 'user.name=Test Fixture',

@@ -40,12 +40,15 @@ class SetupTest(unittest.TestCase):
         self.root_patch.start()
         self.packages = mock.patch.object(setup, "missing_packages", return_value=[])
         self.packages.start()
+        self.privileged = mock.patch.object(setup, "privileged_readiness", return_value=[])
+        self.privileged.start()
         self.output = contextlib.redirect_stdout(io.StringIO())
         self.output.__enter__()
 
     def tearDown(self):
         self.output.__exit__(None, None, None)
         self.packages.stop()
+        self.privileged.stop()
         self.root_patch.stop()
         self.env.stop()
         self.temp.cleanup()

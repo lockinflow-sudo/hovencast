@@ -63,6 +63,16 @@ Root helper installation is separate from ordinary discovery. Uninstallation
 removes the metadata grant before its fixed files. No general Python/root or
 NetworkManager authorization is granted.
 
+The same installed reader supports a read-only installation check for eight
+fixed HovenCast helper, policy and rule files. It returns only SHA-256 hashes,
+ownership and modes, with bounded regular-file reads and no destination symlink
+following; callers cannot select paths. Setup first verifies the reader, its
+wrapper and deny-by-default policy against the candidate source. It then uses
+the existing active-local-session authorization without an internal password
+prompt to check protected grants, and compares all eight records against the
+candidate. Missing, stale, unsafe or unavailable components keep setup incomplete.
+Repair still requires the normal interactive setup confirmation and admin approval.
+
 Grouping requires fresh, same-snapshot advertised hostname/IP, matching LAN
 service metadata and independent non-conflicting Roku ECP anchors. Reused
 container IDs never justify a merge. Changed NetworkManager activation paths,

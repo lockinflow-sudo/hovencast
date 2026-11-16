@@ -13,6 +13,7 @@ import subprocess
 import sys
 
 import portal_config
+from read_p2p_metadata import INSTALLATION_FILES, installed_file_record
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = (
@@ -40,11 +41,43 @@ def missing_packages() -> list[str]:
     return [name for name in PACKAGES if name not in installed]
 
 
+def privileged_readiness() -> list[str]:
+    """Check exact installed helpers/grants without prompting or modifying them."""
+    repair = "Install or repair the scoped Wi-Fi Direct and receiver metadata helpers"
+    expected = {}
+    try:
+        for name, _destination, mode in INSTALLATION_FILES:
+            expected[name] = {"uid": 0, "gid": 0, "mode": mode,
+                              "sha256": hashlib.sha256((ROOT / "scripts" / name).read_bytes()).hexdigest()}
+        # Verify the fixed entry point and its isolated script before invoking it.
+        # Polkit rules may be unreadable to the user, so the installed reader
+        # reports only hashes and metadata for the eight fixed owned paths.
+        for name, destination, _mode in INSTALLATION_FILES:
+            if name in {"read_p2p_metadata.py", "hovencast-metadata-reader",
+                        "org.hovencast.metadata.policy"}:
+                if installed_file_record(destination) != expected[name]:
+                    return [repair]
+        result = subprocess.run(
+            ["/usr/bin/pkexec", "--disable-internal-agent",
+             "/usr/local/libexec/hovencast-metadata-reader", str(os.getpid()),
+             "--check-installation"],
+            capture_output=True, text=True, check=False, timeout=5)
+        if result.returncode:
+            return [repair]
+        reply = json.loads(result.stdout)
+        if reply != {"version": 1, "installation": expected}:
+            return [repair]
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return [repair]
+    return []
+
+
 def readiness(*, require_complete: bool = True) -> dict:
     issues = []
     missing = missing_packages()
     if missing:
         issues.append("Install missing packages: " + ", ".join(missing))
+    issues.extend(privileged_readiness())
     helper = ROOT / "build/wfd-sender"
     source_hash = hashlib.sha256((ROOT / "src/wfd_sender.c").read_bytes()).hexdigest()
     hash_file = ROOT / "build/wfd-sender.source.sha256"
